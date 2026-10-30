@@ -1,4 +1,4 @@
-"""Additional Toolpaths - Fusion add-in entry point.
+"""Fusion Free Deburr - Fusion add-in entry point.
 
 Registers the Ball Deburr button; the command itself lives in ball_deburr_command.py.
 """
@@ -54,7 +54,7 @@ _marking_menu_handler = None  # kept separately so stop() can unregister it
 
 def log(msg: str):
     """Write to the Text Commands window (View > Show Text Commands)."""
-    _app.log(f'[AdditionalToolpaths] {msg}')
+    _app.log(f'[FusionFreeDeburr] {msg}')
 
 
 def _dump_ui_ids(ws_id: str):
@@ -140,7 +140,7 @@ def run(context):
 
         panel = _find_panel()
         if panel is None:
-            _ui.messageBox('AdditionalToolpaths: could not find a toolbar panel to add the button to.')
+            _ui.messageBox('FusionFreeDeburr: could not find a toolbar panel to add the button to.')
             return
         if not panel.controls.itemById(CMD_ID):
             control = panel.controls.addCommand(cmd_def)
@@ -149,7 +149,7 @@ def run(context):
         log(f'Started; button added to panel "{panel.id}"')
     except:
         if _ui:
-            _ui.messageBox(f'AdditionalToolpaths failed to start:\n{traceback.format_exc()}')
+            _ui.messageBox(f'FusionFreeDeburr failed to start:\n{traceback.format_exc()}')
 
 
 def stop(context):
@@ -176,4 +176,4 @@ def stop(context):
         log('Stopped')
     except:
         if _ui:
-            _ui.messageBox(f'AdditionalToolpaths failed to stop:\n{traceback.format_exc()}')
+            _ui.messageBox(f'FusionFreeDeburr failed to stop:\n{traceback.format_exc()}')

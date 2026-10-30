@@ -3,7 +3,7 @@ import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'AdditionalToolpaths'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'FusionFreeDeburr'))
 import deburr_math as dm  # noqa: E402
 
 Z = (0.0, 0.0, 1.0)

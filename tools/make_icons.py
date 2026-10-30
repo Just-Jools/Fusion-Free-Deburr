@@ -4,7 +4,7 @@ import os
 
 from PIL import Image, ImageDraw
 
-OUT = os.path.join(os.path.dirname(__file__), '..', 'AdditionalToolpaths', 'resources', 'BallDeburr')
+OUT = os.path.join(os.path.dirname(__file__), '..', 'FusionFreeDeburr', 'resources', 'BallDeburr')
 SIZES = (16, 32, 64)
 CANVAS = 256  # draw large, downsample for smooth edges
 
