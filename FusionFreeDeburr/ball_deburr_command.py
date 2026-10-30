@@ -1,5 +1,6 @@
 """The Ball Deburr command: dialog, create, and edit of deburr trace operations."""
 
+import math
 import traceback
 
 import adsk.core
@@ -268,7 +269,14 @@ def _execute(inputs: adsk.core.CommandInputs):
     sel = adsk.core.SelectionCommandInput.cast(inputs.itemById(IN_EDGES))
     edges = [adsk.fusion.BRepEdge.cast(sel.selection(i).entity) for i in range(sel.selectionCount)]
     width = adsk.core.ValueCommandInput.cast(inputs.itemById(IN_WIDTH)).value  # cm
-    radius = cam_tools.diameter_cm(tool) / 2
+    if not math.isfinite(width) or width <= 0:
+        _ui.messageBox('Edge break width must be positive and finite.')
+        return
+    try:
+        radius = cam_tools.validate_ball_tool(tool)
+    except ValueError as e:
+        _ui.messageBox(str(e))
+        return
 
     op = s.edit_op
     if op:

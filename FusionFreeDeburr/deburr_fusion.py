@@ -12,8 +12,8 @@ import adsk.cam
 from . import deburr_chain as dc
 from . import deburr_math as dm
 
-SAMPLE_STEP = 0.05          # max spacing between samples on curved edges (0.5 mm)
-CONVEXITY_PROBE = 0.005     # step along the outward bisector to test convexity
+SAMPLE_STEP = 0.05          # max spacing for corner clearance checks (0.5 mm)
+CONVEXITY_PROBE = 0.005     # lateral probe distance for convexity
 VERTEX_TOL = 1e-4           # cm; vertices this close are treated as the same
 TRACE_STRATEGY = 'trace'
 
@@ -43,14 +43,12 @@ def _vertex_key(vertex: adsk.fusion.BRepVertex):
 def _sample_edge(edge: adsk.fusion.BRepEdge, straight: bool):
     ev = edge.evaluator
     _, t0, t1 = ev.getParameterExtents()
-    _, length = ev.getLengthAtParameter(t0, t1)
-    n = 1 if straight else max(2, math.ceil(length / SAMPLE_STEP))
-    points = []
-    for i in range(n + 1):
-        _, t = ev.getParameterAtLength(t0, length * i / n)
-        _, p = ev.getPointAtParameter(t)
-        points.append(_tup(p))
-    return points
+    if straight:
+        return [_tup(ev.getPointAtParameter(t)[1]) for t in (t0, t1)]
+    ok, points = ev.getStrokes(t0, t1, 0.001)  # 0.01 mm chord tolerance
+    if not ok or len(points) < 2:
+        raise dm.DeburrError('could not sample edge')
+    return [_tup(p) for p in points]
 
 
 def _normal(face: adsk.fusion.BRepFace, p):
@@ -74,6 +72,21 @@ class _FaceIds:
         return len(self._faces) - 1
 
 
+def _check_convexity(edge, f1, f2, checks):
+    """Across the wedge, both probes are outside only at a convex edge."""
+    for p in checks:
+        direction = dm.normalize(dm.sub(_normal(f1, p), _normal(f2, p)))
+        for step in (CONVEXITY_PROBE, CONVEXITY_PROBE / 10):
+            states = [edge.body.pointContainment(adsk.core.Point3D.create(
+                *dm.add(p, dm.scale(direction, sign * step)))) for sign in (-1, 1)]
+            if all(v == adsk.fusion.PointContainment.PointOutsidePointContainment for v in states):
+                break
+            if any(v == adsk.fusion.PointContainment.PointInsidePointContainment for v in states):
+                raise dm.DeburrError('edge is concave or obstructed')
+        else:
+            raise dm.DeburrError('could not establish edge convexity')
+
+
 def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids) -> dc.Segment:
     """Tool-tip path for one edge, oriented start vertex -> end vertex.
     Raises DeburrError if the edge can't be done."""
@@ -92,14 +105,8 @@ def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids)
         if dc.dist(samples[0], start) > dc.dist(samples[-1], start):
             samples.reverse()
 
-    # Convexity check at the middle sample: just outside the edge along the
-    # outward bisector must be outside the body.
-    mid = samples[len(samples) // 2]
-    u = dm.normalize(dm.add(_normal(f1, mid), _normal(f2, mid)))
-    probe = dm.add(mid, dm.scale(u, CONVEXITY_PROBE))
-    containment = edge.body.pointContainment(adsk.core.Point3D.create(*probe))
-    if containment == adsk.fusion.PointContainment.PointInsidePointContainment:
-        raise dm.DeburrError('edge is concave')
+    checks = samples[1:-1] or [dm.scale(dm.add(samples[0], samples[-1]), 0.5)]
+    _check_convexity(edge, f1, f2, checks)
 
     # Edge direction at each end, pointing into the edge (for corner rolls).
     tangents = {0: dm.normalize(dm.sub(samples[1], samples[0])),
@@ -110,6 +117,9 @@ def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids)
         tips.append(dm.tool_tip(p, n1, n2, tool_axis, radius, width))
         if k in tangents:
             ends.append(dc.End(p, {id1: n1, id2: n2}, tangents[k]))
+
+    if closed:
+        tips.append(tips[0])
 
     return dc.Segment(
         tips=tips, start=ends[0], end=ends[-1],
@@ -126,8 +136,15 @@ def _cut_depth(body: adsk.fusion.BRepBody, radius, tool_axis):
 
     def depth(tips):
         worst = -radius
-        for tip in tips:
+        samples = []
+        for a, b in zip(tips, tips[1:]):
+            n = max(1, math.ceil(dc.dist(a, b) / min(SAMPLE_STEP, radius / 4)))
+            samples.extend(dm.add(a, dm.scale(dm.sub(b, a), k / n)) for k in range(n))
+        samples.extend(tips[-1:])
+        for tip in samples:
             center = adsk.core.Point3D.create(*dm.add(tip, dm.scale(z, radius)))
+            if body.pointContainment(center) == adsk.fusion.PointContainment.PointInsidePointContainment:
+                return 2 * radius
             worst = max(worst, radius - measure.measureMinimumDistance(center, body).value)
         return worst
     return depth
@@ -174,8 +191,7 @@ def build_sketch(design: adsk.fusion.Design, chains, name):
     splines = sketch.sketchCurves.sketchFixedSplines
     curve_chains = []
     try:
-        for chain in chains:
-            points = dc.chain_points(chain)
+        for points in [p for chain in chains for p in dc.chain_polylines(chain)]:
             ctrl = [sketch.modelToSketchSpace(adsk.core.Point3D.create(*p)) for p in points]
             nurbs = adsk.core.NurbsCurve3D.createNonRational(ctrl, 1, dc.polyline_knots(points), False)
             curve_chains.append([splines.addByNurbsCurve(nurbs)])
@@ -210,6 +226,18 @@ def _apply_curves(value: adsk.cam.CadContours2dParameterValue, curve_chains):
     value.applyCurveSelections(selections)
 
 
+def _trace_settings(op):
+    """Paths already describe the tool tip: disable Trace displacement."""
+    for name, expression in (('compensation', "'center'"),
+                             ('compensationType', "'off'"),
+                             ('axialOffset', '0 mm'), ('radialOffset', '0 mm')):
+        param = op.parameters.itemByName(name)
+        if not param and name in ('compensation', 'axialOffset'):
+            raise dm.DeburrError(f'Trace is missing required safety parameter: {name}')
+        if param:
+            param.expression = expression
+
+
 def create_trace(setup: adsk.cam.Setup, curve_chains, name, tool=None):
     op_input = setup.operations.createInput(TRACE_STRATEGY)
     op_input.displayName = name
@@ -220,11 +248,13 @@ def create_trace(setup: adsk.cam.Setup, curve_chains, name, tool=None):
     op = setup.operations.add(op_input)
     # Curves go on the added operation (same path as editing), so create and
     # edit can't diverge in how the selection is stored.
+    _trace_settings(op)
     _apply_curves(_curves_parameter(op), curve_chains)
     return op
 
 
 def update_trace_curves(op: adsk.cam.Operation, curve_chains):
+    _trace_settings(op)
     _apply_curves(_curves_parameter(op), curve_chains)
 
 

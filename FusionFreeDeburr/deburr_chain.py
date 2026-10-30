@@ -153,7 +153,7 @@ def find_crossing(a, b, axis):
     """Where polyline a's tail crosses polyline b's head, viewed along the tool axis.
 
     Returns (i, j, point): a[i]..a[i+1] crosses b[j]..b[j+1] at point (3D,
-    interpolated on a). None if they don't cross.
+    interpolated on a). Both interpolated 3D positions must agree within JOIN_TOL.
     """
     u, v = _plane_basis(axis)
     to2d = lambda p: (dm.dot(p, u), dm.dot(p, v))
@@ -162,9 +162,11 @@ def find_crossing(a, b, axis):
         for j in range(0, min(len(b) - 1, CROSSING_SEARCH)):
             hit = _seg_intersection_2d(a2[i], a2[i + 1], b2[j], b2[j + 1])
             if hit:
-                s, _ = hit
+                s, t = hit
                 point = dm.add(a[i], dm.scale(dm.sub(a[i + 1], a[i]), s))
-                return i, j, point
+                other = dm.add(b[j], dm.scale(dm.sub(b[j + 1], b[j]), t))
+                if dist(point, other) <= JOIN_TOL:
+                    return i, j, point
     return None
 
 
@@ -249,7 +251,7 @@ def _corner(k, a_end, b_start, a_tip, b_tip, tool_axis, radius, width, depth, no
     outside, and crossing over the vertex. With `depth` (max cut depth of a
     tool-tip path into the real part), the shallower one wins; otherwise the
     roll is preferred. Adds a note if even the best one cuts deeper than the
-    edges themselves do at this corner."""
+    edges themselves do at this corner; unsafe candidates split the paths."""
     candidates, errors = [], []
     for make in (lambda: corner_roll(a_end, b_start, tool_axis, radius, width),
                  lambda: vertex_crossing(a_tip, b_tip, a_end.vertex, tool_axis, radius)):
@@ -262,17 +264,22 @@ def _corner(k, a_end, b_start, a_tip, b_tip, tool_axis, radius, width, depth, no
         if candidates and depth is None:
             break
     if not candidates:
-        notes.append(f'corner {k + 1}: {errors[0]}; using a straight link')
-        return [a_tip, b_tip]
+        notes.append(f'corner {k + 1}: {errors[0]}; paths split')
+        return None
     if depth is None:
         return candidates[0]
-    scored = sorted((depth(c), i, c) for i, c in enumerate(candidates))
-    best_depth, _, best = scored[0]
-    edge_depth = max(depth([a_tip]), depth([b_tip]))
+    try:
+        scored = sorted((depth(c), i, c) for i, c in enumerate(candidates))
+        best_depth, _, best = scored[0]
+        edge_depth = max(depth([a_tip]), depth([b_tip]))
+    except Exception:
+        notes.append(f'corner {k + 1}: clearance check failed; paths split')
+        return None
     excess = best_depth - edge_depth
     if excess > max(0.1 * width, 1e-3):
         notes.append(f'corner {k + 1}: the ball cuts about {excess * 10:.3f} mm deeper than '
-                     f'the edge break here (material beyond the corner); check this corner')
+                     f'the edge break here; paths split')
+        return None
     return best
 
 
@@ -301,11 +308,6 @@ def link_chain(segments, closed, tool_axis, radius, width, depth=None):
             tips[k] = a[:i + 1] + [point]
             tips[n] = [point] + b[j + 1:]
             continue
-        if set(segments[k].end.normals) == set(segments[n].start.normals):
-            # Same two faces on both sides (one boundary split into several
-            # edges, e.g. a seam): not a real corner, just bridge the small gap.
-            connectors[k] = [a[-1], b[0]]
-            continue
         connectors[k] = _corner(k, segments[k].end, segments[n].start, a[-1], b[0],
                                 tool_axis, radius, width, depth, chain.notes)
 
@@ -322,14 +324,28 @@ def link_chain(segments, closed, tool_axis, radius, width, depth=None):
 
 # --- Output as one polyline per chain ----------------------------------------
 
+def chain_polylines(chain):
+    """Separate contours at every unconnected joint; never bridge a failed corner."""
+    paths = []
+    for piece in chain.pieces:
+        points = _clean(piece.points)
+        if len(points) < 2:
+            continue
+        if paths and dist(paths[-1][-1], points[0]) <= JOIN_TOL:
+            paths[-1].extend(points[1:])
+        else:
+            paths.append(points)
+    if chain.closed and len(paths) > 1 and dist(paths[-1][-1], paths[0][0]) <= JOIN_TOL:
+        paths[0] = paths.pop() + paths[0][1:]
+    return paths
+
+
 def chain_points(chain):
-    """All points of a chain as one polyline; a closed chain ends on its start."""
-    points = _clean([p for piece in chain.pieces for p in piece.points])
-    if chain.closed and len(points) > 2 and dist(points[-1], points[0]) > JOIN_TOL:
-        points.append(points[0])
-    elif chain.closed and len(points) > 2:
-        points[-1] = points[0]
-    return points
+    """Return one connected polyline; reject disconnected chains."""
+    paths = chain_polylines(chain)
+    if len(paths) > 1:
+        raise dm.DeburrError('chain contains split paths')
+    return paths[0] if paths else []
 
 
 def polyline_knots(points):

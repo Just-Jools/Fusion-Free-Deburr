@@ -7,6 +7,7 @@ Entries are plain dicts so they can be sent to the tool picker HTML as-is.
 Fusion Tool objects are only created for the tool the user actually picks.
 """
 
+import math
 import glob
 import json
 import os
@@ -32,6 +33,14 @@ def tool_type(tool: adsk.cam.Tool) -> str:
 def diameter_cm(tool: adsk.cam.Tool) -> float:
     """Tool diameter in internal units (cm)."""
     return _param_value(tool, 'tool_diameter')
+
+
+def validate_ball_tool(tool):
+    diameter = diameter_cm(tool) if tool else None
+    if (not tool or tool_type(tool) != BALL_END_MILL or
+            not isinstance(diameter, (int, float)) or not math.isfinite(diameter) or diameter <= 0):
+        raise ValueError('Select a ball endmill with a positive finite diameter.')
+    return diameter / 2
 
 
 def diameter_expression(tool: adsk.cam.Tool) -> str:
