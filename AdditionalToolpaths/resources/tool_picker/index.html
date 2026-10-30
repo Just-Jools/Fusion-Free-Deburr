@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #2f343c; --panel: #383d46; --row: #3e444e; --hover: #48505c; --sel: #1f6fb8;
+    --text: #e4e6ea; --muted: #9aa1ab; --border: #4a515c; --accent: #2d8ce6;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 12px "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  body { display: flex; flex-direction: column; min-height: 100vh; }
+  input, select { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+                  border-radius: 3px; padding: 4px 6px; font: inherit; outline: none; }
+  input:focus, select:focus { border-color: var(--accent); }
+  input[type=number] { width: 70px; }
+  input[type=checkbox] { margin: 0 4px 0 0; vertical-align: -2px; }
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 8px 6px; }
+  header input { flex: 1; }
+  #count { color: var(--muted); white-space: nowrap; }
+  #filters { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center;
+             padding: 0 8px 8px; border-bottom: 1px solid var(--border); }
+  #filters .f { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #filters .label { color: var(--muted); }
+  #types label { margin-right: 8px; cursor: pointer; }
+  #types .n, .unit { color: var(--muted); }
+  #clear { margin-left: auto; }
+  main { flex: 1; display: flex; min-height: 0; }
+  nav { width: 210px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; padding: 4px 0; }
+  nav .lib { display: flex; justify-content: space-between; align-items: center; gap: 6px;
+             padding: 5px 10px; cursor: pointer; }
+  nav .lib:hover { background: var(--hover); }
+  nav .lib.active { background: var(--sel); }
+  nav .lib .n { color: var(--muted); }
+  nav .lib.active .n { color: var(--text); }
+  nav .group { padding: 8px 10px 3px; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+  nav button { font-size: 11px; padding: 2px 8px; }
+  #tablewrap { flex: 1; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 600;
+       padding: 6px 8px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
+  th.sorted::after { content: " \25B4"; }
+  th.sorted.desc::after { content: " \25BE"; }
+  td { padding: 5px 8px; border-bottom: 1px solid #353a42; white-space: nowrap; }
+  td.desc { white-space: normal; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:hover { background: var(--hover); }
+  tbody tr.selected { background: var(--sel); }
+  .muted { color: var(--muted); }
+  #empty { padding: 24px; text-align: center; color: var(--muted); }
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+           padding: 8px; border-top: 1px solid var(--border); }
+  #status { color: var(--muted); }
+  #status.error { color: #ff8a80; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+           border-radius: 3px; padding: 5px 14px; cursor: pointer; font: inherit; }
+  button:hover:not(:disabled) { background: var(--hover); }
+  button.primary { background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--muted);
+             border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite;
+             vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <input id="search" type="text" placeholder="Search description, vendor, product id, T#..." autofocus>
+  <span id="count"></span>
+</header>
+<div id="filters">
+  <div class="f" id="types"></div>
+  <div class="f">
+    <span class="label">Diameter</span>
+    <input id="dmin" type="number" min="0" step="any" placeholder="min">
+    <span>&ndash;</span>
+    <input id="dmax" type="number" min="0" step="any" placeholder="max">
+    <span class="unit"></span>
+  </div>
+  <div class="f">
+    <span class="label">Flute length &ge;</span>
+    <input id="fmin" type="number" min="0" step="any">
+    <span class="unit"></span>
+  </div>
+  <div class="f">
+    <span class="label">Flutes</span>
+    <select id="nof"><option value="">Any</option></select>
+  </div>
+  <button id="clear">Clear filters</button>
+</div>
+<main>
+  <nav id="libs"></nav>
+  <div id="tablewrap">
+    <table>
+      <thead><tr>
+        <th data-key="number">T#</th>
+        <th data-key="description">Description</th>
+        <th data-key="type">Type</th>
+        <th data-key="diameterCm">Diameter</th>
+        <th data-key="fluteCm">Flute length</th>
+        <th data-key="flutes">Flutes</th>
+        <th data-key="library">Library</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" hidden>No tools match the filters.</div>
+  </div>
+</main>
+<footer>
+  <span id="status"></span>
+  <span>
+    <button id="cancel">Cancel</button>
+    <button id="select" class="primary" disabled>Select</button>
+  </span>
+</footer>
+
+<script>
+  // Data from Fusion
+  let entries = [];
+  let cloudLoaded = false;
+  let unit = { label: 'mm', cmPerUnit: 0.1 };
+
+  // UI state (kept while the palette exists, so filters survive reopening)
+  let cloudLoading = false;
+  let library = '*';                 // '*' = all, otherwise "<source>|<library>"
+  const hiddenTypes = new Set();     // types unchecked by the user; new types show by default
+  let sortKey = 'diameterCm', sortDesc = false;
+  let selectedId = null;
+
+  const EPS = 1e-6;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const libKey = (e) => `${e.source}|${e.library}`;
+  const typeLabel = (t) => t ? t[0].toUpperCase() + t.slice(1) : 'Unknown';
+
+  function send(action, data) {
+    return adsk.fusionSendData(action, JSON.stringify(data || {}));
+  }
+
+  function setData(payload) {
+    entries = payload.entries;
+    cloudLoaded = payload.cloudLoaded;
+    unit = payload.unit || unit;
+    cloudLoading = false;
+    if (selectedId && !entries.some((e) => e.id === selectedId)) selectedId = null;
+    for (const el of document.querySelectorAll('.unit')) el.textContent = unit.label;
+    setStatus('');
+    renderFilters();
+    render();
+  }
+
+  function setStatus(text, isError) {
+    $('status').textContent = text;
+    $('status').className = isError ? 'error' : '';
+  }
+
+  // ---- Filtering -------------------------------------------------------
+
+  function cm(inputId) {
+    const v = parseFloat($(inputId).value);
+    return Number.isFinite(v) ? v * unit.cmPerUnit : null;
+  }
+
+  // Everything except the library and type filters (those show counts).
+  function passesCommon(e) {
+    const q = $('search').value.trim().toLowerCase();
+    if (q && ![e.description, e.vendor, e.productId, e.library, e.type, e.diameter,
+               e.number != null ? `t${e.number}` : '']
+          .some((v) => String(v ?? '').toLowerCase().includes(q))) return false;
+    const dmin = cm('dmin'), dmax = cm('dmax'), fmin = cm('fmin');
+    if (dmin != null && !(e.diameterCm >= dmin - EPS)) return false;
+    if (dmax != null && !(e.diameterCm <= dmax + EPS)) return false;
+    if (fmin != null && !(e.fluteCm >= fmin - EPS)) return false;
+    const nof = $('nof').value;
+    if (nof && String(e.flutes) !== nof) return false;
+    return true;
+  }
+
+  const passesType = (e) => !hiddenTypes.has(e.type);
+  const passesLibrary = (e) => library === '*' || libKey(e) === library;
+
+  function visibleEntries() {
+    const list = entries.filter((e) => passesCommon(e) && passesType(e) && passesLibrary(e));
+    list.sort((a, b) => {
+      const x = a[sortKey], y = b[sortKey];
+      const c = (x == null || y == null)
+        ? (x == null) - (y == null)  // blanks last
+        : (typeof x === 'number' ? x - y : String(x).localeCompare(String(y)));
+      return sortDesc ? -c : c;
+    });
+    return list;
+  }
+
+  // ---- Rendering -------------------------------------------------------
+
+  function renderFilters() {
+    // Flute count options from the data, keeping the current choice.
+    const nof = $('nof'), current = nof.value;
+    const counts = [...new Set(entries.map((e) => e.flutes).filter((n) => n != null))].sort((a, b) => a - b);
+    nof.innerHTML = '<option value="">Any</option>' +
+      counts.map((n) => `<option value="${n}">${n}</option>`).join('');
+    nof.value = counts.map(String).includes(current) ? current : '';
+  }
+
+  function renderTypes() {
+    const counts = {};
+    for (const e of entries) if (passesCommon(e) && passesLibrary(e)) counts[e.type] = (counts[e.type] || 0) + 1;
+    const types = [...new Set(entries.map((e) => e.type))].sort();
+    $('types').innerHTML = '<span class="label">Type</span>' + types.map((t) => `
+      <label><input type="checkbox" data-type="${esc(t)}" ${hiddenTypes.has(t) ? '' : 'checked'}>${esc(typeLabel(t))}
+      <span class="n">(${counts[t] || 0})</span></label>`).join('');
+    for (const cb of document.querySelectorAll('#types input')) {
+      cb.onchange = () => {
+        if (cb.checked) hiddenTypes.delete(cb.dataset.type); else hiddenTypes.add(cb.dataset.type);
+        render();
+      };
+    }
+  }
+
+  function renderLibs() {
+    const counts = {};
+    let total = 0;
+    for (const e of entries) {
+      if (!passesCommon(e) || !passesType(e)) continue;
+      counts[libKey(e)] = (counts[libKey(e)] || 0) + 1;
+      total++;
+    }
+    const groups = [['document', 'This document'], ['local', 'Local'], ['cloud', 'Cloud']];
+    let html = libRow('*', 'All libraries', total);
+    for (const [source, title] of groups) {
+      const libs = [...new Set(entries.filter((e) => e.source === source).map((e) => e.library))].sort();
+      let extra = '';
+      if (source === 'cloud' && !cloudLoaded) {
+        extra = cloudLoading ? ' <span class="spinner"></span>' : ' <button id="loadCloud">Load</button>';
+      }
+      html += `<div class="group">${title}${extra}</div>`;
+      for (const lib of libs) html += libRow(`${source}|${lib}`, lib, counts[`${source}|${lib}`]);
+      if (!libs.length && (source !== 'cloud' || cloudLoaded)) {
+        html += '<div class="lib muted" style="cursor:default">No matching tools</div>';
+      }
+    }
+    $('libs').innerHTML = html;
+    for (const el of document.querySelectorAll('nav .lib[data-lib]')) {
+      el.onclick = () => { library = el.dataset.lib; render(); };
+    }
+    const load = $('loadCloud');
+    if (load) load.onclick = loadCloud;
+  }
+
+  function libRow(key, label, n) {
+    const active = key === library ? ' active' : '';
+    return `<div class="lib${active}" data-lib="${esc(key)}"><span>${esc(label)}</span><span class="n">${n || 0}</span></div>`;
+  }
+
+  function renderRows() {
+    const list = visibleEntries();
+    $('rows').innerHTML = list.map((e) => `
+      <tr data-id="${esc(e.id)}" class="${e.id === selectedId ? 'selected' : ''}">
+        <td class="num">${e.number ?? ''}</td>
+        <td class="desc">${esc(e.description)}${e.vendor ? ` <span class="muted">${esc(e.vendor)} ${esc(e.productId)}</span>` : ''}</td>
+        <td>${esc(typeLabel(e.type))}</td>
+        <td class="num">${esc(e.diameter)}</td>
+        <td class="num">${esc(e.flute)}</td>
+        <td class="num">${e.flutes ?? ''}</td>
+        <td class="muted">${esc(e.library)}</td>
+      </tr>`).join('');
+    $('empty').hidden = list.length > 0;
+    $('count').textContent = `${list.length} of ${entries.length}`;
+    for (const tr of $('rows').children) {
+      tr.onclick = () => { selectedId = tr.dataset.id; renderRows(); };
+      tr.ondblclick = () => { selectedId = tr.dataset.id; choose(); };
+    }
+    for (const th of document.querySelectorAll('th')) {
+      th.classList.toggle('sorted', th.dataset.key === sortKey);
+      th.classList.toggle('desc', th.dataset.key === sortKey && sortDesc);
+    }
+    $('select').disabled = !selectedId || !list.some((e) => e.id === selectedId);
+  }
+
+  function render() { renderTypes(); renderLibs(); renderRows(); }
+
+  // ---- Actions ---------------------------------------------------------
+
+  function loadCloud() {
+    cloudLoading = true;
+    setStatus('Loading cloud libraries...');
+    renderLibs();
+    send('loadCloud');
+  }
+
+  function choose() {
+    if (selectedId && !$('select').disabled) send('select', { id: selectedId });
+  }
+
+  function clearFilters() {
+    for (const id of ['search', 'dmin', 'dmax', 'fmin']) $(id).value = '';
+    $('nof').value = '';
+    hiddenTypes.clear();
+    library = '*';
+    render();
+  }
+
+  for (const th of document.querySelectorAll('th')) {
+    th.onclick = () => {
+      if (sortKey === th.dataset.key) sortDesc = !sortDesc; else { sortKey = th.dataset.key; sortDesc = false; }
+      renderRows();
+    };
+  }
+  for (const id of ['search', 'dmin', 'dmax', 'fmin']) $(id).oninput = render;
+  $('nof').onchange = render;
+  $('clear').onclick = clearFilters;
+  $('select').onclick = choose;
+  $('cancel').onclick = () => send('cancel');
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') send('cancel');
+    if (ev.key === 'Enter' && ev.target.tagName !== 'SELECT') choose();
+  });
+
+  window.fusionJavaScriptHandler = {
+    handle(action, data) {
+      try {
+        if (action === 'init') setData(JSON.parse(data));
+        else if (action === 'error') { cloudLoading = false; renderLibs(); setStatus(data, true); }
+      } catch (e) {
+        setStatus(String(e), true);
+      }
+      return 'OK';
+    }
+  };
+
+  // The adsk bridge is injected by Fusion shortly after the page loads.
+  (function waitForFusion() {
+    if (window.adsk && adsk.fusionSendData) {
+      send('ready').then((r) => { if (r) setData(JSON.parse(r)); });
+    } else {
+      setTimeout(waitForFusion, 50);
+    }
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+    "python.analysis.extraPaths": [
+        "${env:APPDATA}/Autodesk/Autodesk Fusion 360/API/Python/defs"
+    ],
+    "python.autoComplete.extraPaths": [
+        "${env:APPDATA}/Autodesk/Autodesk Fusion 360/API/Python/defs"
+    ]
+}
