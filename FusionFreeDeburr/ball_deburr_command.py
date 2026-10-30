@@ -299,24 +299,24 @@ def _execute(inputs: adsk.core.CommandInputs):
     # Make every design/operation change first and generate last; any change
     # after generation (even renaming the sketch) marks the toolpath outdated.
     if op:
-        old_sketch = deburr_fusion.find_by_token(s.design, s.settings().get('sketch'), adsk.fusion.Sketch.cast)
-        if old_sketch:
-            # Free the name; Fusion would suffix the new sketch otherwise.
-            old_sketch.name = f'{old_sketch.name} (old)'
-        sketch, curve_chains = deburr_fusion.build_sketch(s.design, chains, op.name)
-        deburr_fusion.update_trace_curves(op, curve_chains)
-        if not is_current_tool:
-            op.tool = tool
-        if old_sketch:
-            old_sketch.deleteMe()
+        sketch = deburr_fusion.update_operation(
+            s.design, op, chains, used_edges, width,
+            None if is_current_tool else tool)
+        s.cam.generateToolpath(op)
         verb = 'Updated'
     else:
         name = _unique_operation_name(DEFAULT_NAME)
         sketch, curve_chains = deburr_fusion.build_sketch(s.design, chains, name)
-        op = deburr_fusion.create_trace(setup, curve_chains, name, tool)
+        try:
+            op = deburr_fusion.create_trace(setup, curve_chains, name, tool)
+            deburr_fusion.save_settings(op, used_edges, width, sketch)
+            s.cam.generateToolpath(op)
+        except Exception:
+            if op:
+                op.deleteMe()
+            sketch.deleteMe()
+            raise
         verb = 'Created'
-    deburr_fusion.save_settings(op, used_edges, width, sketch)
-    s.cam.generateToolpath(op)
 
     summary = ', '.join(f'{len(c.pieces)} pieces{" (closed)" if c.closed else ""}' for c in chains)
     _log(f'{verb} "{op.name}": {len(chains)} chain(s) [{summary}], sketch "{sketch.name}"')

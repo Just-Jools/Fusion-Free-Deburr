@@ -12,7 +12,8 @@ import adsk.cam
 from . import deburr_chain as dc
 from . import deburr_math as dm
 
-SAMPLE_STEP = 0.05          # max spacing for corner clearance checks (0.5 mm)
+SAMPLE_STEP = 0.05          # max edge/clearance sample spacing (0.5 mm)
+PATH_TOL = 0.001           # tool-tip chord tolerance (0.01 mm)
 CONVEXITY_PROBE = 0.005     # lateral probe distance for convexity
 VERTEX_TOL = 1e-4           # cm; vertices this close are treated as the same
 TRACE_STRATEGY = 'trace'
@@ -49,6 +50,44 @@ def _sample_edge(edge: adsk.fusion.BRepEdge, straight: bool):
     if not ok or len(points) < 2:
         raise dm.DeburrError('could not sample edge')
     return [_tup(p) for p in points]
+
+
+def _refine_samples(edge, samples, radius, width, tool_axis):
+    """Split long spans or spans whose tool-tip midpoint misses the chord."""
+    ev = edge.evaluator
+    f1, f2 = edge.faces.item(0), edge.faces.item(1)
+
+    def tip(p):
+        return dm.tool_tip(p, _normal(f1, p), _normal(f2, p), tool_axis, radius, width)
+
+    def split(a, b, pa, pb, ta, tb, depth):
+        ok, length = ev.getLengthAtParameter(min(pa, pb), max(pa, pb))
+        ok_p, p = ev.getPointAtParameter((pa + pb) / 2)
+        if not ok or not ok_p:
+            raise dm.DeburrError('could not refine edge samples')
+        mid = _tup(p)
+        tm = tip(mid)
+        if length > SAMPLE_STEP or dc.dist(tm, dm.scale(dm.add(ta, tb), 0.5)) > PATH_TOL:
+            if depth == 12:
+                raise dm.DeburrError('tool-tip sampling tolerance could not be reached')
+            return (split(a, mid, pa, (pa + pb) / 2, ta, tm, depth + 1) +
+                    split(mid, b, (pa + pb) / 2, pb, tm, tb, depth + 1))
+        return [a]
+
+    ok, t0, t1 = ev.getParameterExtents()
+    if not ok:
+        raise dm.DeburrError('could not evaluate edge parameters')
+    parameters = [t0]
+    for p in samples[1:-1]:
+        ok, t = ev.getParameterAtPoint(adsk.core.Point3D.create(*p))
+        if not ok:
+            raise dm.DeburrError('could not evaluate sample parameters')
+        parameters.append(t)
+    parameters.append(t1)  # at a closed seam, point lookup could return t0 instead
+    points = []
+    for a, b, pa, pb in zip(samples, samples[1:], parameters, parameters[1:]):
+        points.extend(split(a, b, pa, pb, tip(a), tip(b), 0))
+    return points + samples[-1:]
 
 
 def _normal(face: adsk.fusion.BRepFace, p):
@@ -99,7 +138,15 @@ def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids)
     closed = _is_closed(edge)
     samples = _sample_edge(edge, straight)
     if closed:
+        samples = dc._clean(samples)
+        if len(samples) < 4 or len(set(samples[:-1])) < 3:
+            raise dm.DeburrError('closed edge has too few sample points')
+    if not straight:
+        samples = _refine_samples(edge, samples, radius, width, tool_axis)
+    if closed:
         samples = samples[:-1]
+        if len(dc._clean(samples)) < 3:
+            raise dm.DeburrError('closed edge has too few distinct sample points')
     else:
         start = _tup(edge.startVertex.geometry)
         if dc.dist(samples[0], start) > dc.dist(samples[-1], start):
@@ -186,17 +233,19 @@ def build_sketch(design: adsk.fusion.Design, chains, name):
     regeneration, swaps the chain for another chain's curves."""
     root = design.rootComponent
     sketch = root.sketches.add(root.xYConstructionPlane)
-    sketch.name = name
-    sketch.isComputeDeferred = True
-    splines = sketch.sketchCurves.sketchFixedSplines
-    curve_chains = []
     try:
+        sketch.name = name
+        sketch.isComputeDeferred = True
+        splines = sketch.sketchCurves.sketchFixedSplines
+        curve_chains = []
         for points in [p for chain in chains for p in dc.chain_polylines(chain)]:
             ctrl = [sketch.modelToSketchSpace(adsk.core.Point3D.create(*p)) for p in points]
             nurbs = adsk.core.NurbsCurve3D.createNonRational(ctrl, 1, dc.polyline_knots(points), False)
             curve_chains.append([splines.addByNurbsCurve(nurbs)])
-    finally:
         sketch.isComputeDeferred = False
+    except Exception:
+        sketch.deleteMe()
+        raise
     return sketch, curve_chains
 
 
@@ -248,14 +297,59 @@ def create_trace(setup: adsk.cam.Setup, curve_chains, name, tool=None):
     op = setup.operations.add(op_input)
     # Curves go on the added operation (same path as editing), so create and
     # edit can't diverge in how the selection is stored.
-    _trace_settings(op)
-    _apply_curves(_curves_parameter(op), curve_chains)
+    try:
+        _trace_settings(op)
+        _apply_curves(_curves_parameter(op), curve_chains)
+    except Exception:
+        op.deleteMe()
+        raise
     return op
 
 
 def update_trace_curves(op: adsk.cam.Operation, curve_chains):
     _trace_settings(op)
     _apply_curves(_curves_parameter(op), curve_chains)
+
+
+def update_operation(design, op, chains, edges, width, tool=None):
+    """Replace the sketch only after all operation settings have been applied."""
+    settings = load_settings(op)
+    old_sketch = find_by_token(design, settings.get('sketch'), adsk.fusion.Sketch.cast)
+    old_name = old_sketch.name if old_sketch else None
+    old_tool = op.tool
+    value = _curves_parameter(op)
+    old_curves = value.getCurveSelections()
+    params = [op.parameters.itemByName(n) for n in
+              ('compensation', 'compensationType', 'axialOffset', 'radialOffset')]
+    expressions = [(p, p.expression) for p in params if p]
+    old_attr = op.attributes.itemByName(ATTR_GROUP, ATTR_NAME).value
+    sketch, curves = build_sketch(design, chains, op.name + ' (new)')
+    try:
+        update_trace_curves(op, curves)
+        if tool is not None:
+            op.tool = tool
+        if old_sketch:
+            old_sketch.name = old_name + ' (old)'
+        sketch.name = op.name
+        save_settings(op, edges, width, sketch)
+        if old_sketch and not old_sketch.deleteMe():
+            raise dm.DeburrError('could not remove the replaced sketch')
+    except Exception:
+        # If restoration fails, keep both sketches: either may still be referenced.
+        try:
+            if tool is not None:
+                op.tool = old_tool
+            for p, expression in expressions:
+                p.expression = expression
+            value.applyCurveSelections(old_curves)
+            op.attributes.add(ATTR_GROUP, ATTR_NAME, old_attr)
+        except Exception as rollback_error:
+            raise dm.DeburrError('Update rollback failed; both sketches retained: ' + str(rollback_error))
+        sketch.deleteMe()
+        if old_sketch:
+            old_sketch.name = old_name
+        raise
+    return sketch
 
 
 # --- Settings stored on the operation, so it can be edited later ---------
