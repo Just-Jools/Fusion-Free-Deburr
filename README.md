@@ -12,7 +12,7 @@
 
 ![Fusion simulation of ball deburring on the showcase part](docs/images/readme/simulation.gif)
 
-*Fusion simulation, shown at 2× speed.*
+*Fusion simulation of the showcase part.*
 
 ## Examples
 
