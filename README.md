@@ -14,6 +14,10 @@
 
 *Fusion simulation of the showcase part.*
 
+![Selected edges and resulting toolpaths](docs/images/readme/workflow-select-edges-to-toolpath.gif)
+
+*Selected edges and their resulting toolpaths.*
+
 ## Examples
 
 | Curved edges and varying Z | Freeform pocket |
@@ -32,9 +36,9 @@
 
 In **Manufacture > Milling > 3D > Ball Deburr**, select the edges, choose a ball end mill, set the edge-break width, and generate the toolpath. Right-click the operation to edit it later.
 
-![Selected edges and resulting toolpaths](docs/images/readme/workflow-select-edges-to-toolpath.gif)
+![Creating a Ball Deburr toolpath in Fusion](docs/images/readme/ball-deburr-walkthrough.gif)
 
-*Selected edges and their resulting toolpaths, shown using Fusion viewport captures.*
+*Select edges, choose a tool and set the edge-break width.*
 
 ## How it works
 
