@@ -1,26 +1,43 @@
+<div align="center">
+
 # Fusion Free Deburr
 
-Ball endmill deburr toolpaths for Autodesk Fusion. Early alpha: simulate before cutting.
+[![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue)](https://github.com/jkkicks/Fusion-Free-Deburr/releases) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 
-## Install (Windows)
+**Free 3-axis deburring toolpaths for Autodesk Fusion, using a ball end mill.**
 
-1. Open [the latest release](https://github.com/jkkicks/Fusion-Free-Deburr/releases) and download **Fusion-Free-Deburr-v0.1.0-alpha.zip** under **Assets**.
-2. Extract the ZIP anywhere on your computer. Keep the extracted files there while using the add-in.
-3. In Fusion, open **Utilities > Add-Ins > Scripts and Add-Ins** and click **+** next to **My Add-Ins**.
-4. Select the extracted **FusionFreeDeburr** folder containing `FusionFreeDeburr.py` and `FusionFreeDeburr.manifest`, then run **FusionFreeDeburr**. Enable **Run on Startup** if desired.
+[Download the latest release](https://github.com/jkkicks/Fusion-Free-Deburr/releases)
 
-If upgrading from AdditionalToolpaths, stop and remove its old entry in Scripts and Add-Ins before adding FusionFreeDeburr.
+</div>
+
+![Fusion simulation of ball deburring on the showcase part](docs/images/readme/simulation.gif)
+
+*Fusion simulation, shown at 2× speed.*
+
+## Examples
+
+| Curved edges and varying Z | Freeform pocket |
+| :---: | :---: |
+| ![Perimeter toolpath](docs/images/readme/gallery-varying-z-perimeter-side.png) | ![Pocket toolpath](docs/images/readme/gallery-freeform-pocket.png) |
+| **Saddle holes** | **Holes on a slope** |
+| ![Ridge hole toolpaths](docs/images/readme/gallery-ridge-saddle-holes.png) | ![Slope hole toolpaths](docs/images/readme/gallery-holes-normal-to-25deg-slope.png) |
+
+## Install
+
+1. Download the ZIP from the [latest release](https://github.com/jkkicks/Fusion-Free-Deburr/releases) and extract it.
+2. In Fusion, press **Shift+S** to open **Scripts and Add-Ins**, or find it under **Utilities > Add-Ins**.
+3. Click **+** beside **My Add-Ins**, select the extracted `FusionFreeDeburr` folder, and run the add-in.
 
 ## Use
 
-**Manufacture > Milling > 3D > Ball Deburr**: select the edges, pick a ball endmill, set the
-edge break width. Right-click the operation to edit it.
+In **Manufacture > Milling > 3D > Ball Deburr**, select the edges, choose a ball end mill, set the edge-break width, and generate the toolpath. Right-click the operation to edit it later.
 
-## Build a release ZIP
+![Selected edges and resulting toolpaths](docs/images/readme/workflow-select-edges-to-toolpath.gif)
 
-Run `python tools/package.py`. The ZIP is written to `dist/` and contains the installable
-`FusionFreeDeburr` folder, these instructions, and the license.
+*Selected edges and their resulting toolpaths, shown using Fusion viewport captures.*
 
-## License
+## How it works
 
-[MIT](LICENSE)
+Fusion Free Deburr generates custom 3D sketch geometry and uses Fusion's native Trace strategy to create the toolpath.
+
+> **Alpha software:** Simulate and inspect the toolpath before machining.
