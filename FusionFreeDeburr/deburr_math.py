@@ -75,14 +75,30 @@ def contact_points(p, n1, n2, u, width):
     return points
 
 
-def tool_tip(p, n1, n2, tool_axis, radius, width):
+def lollipop_contact_height(radius, neck_radius, flute_length):
+    """Highest usable spherical contact above the center, in length units.
+
+    The neck intersects the sphere at sqrt(R² - neck²). Flute length is
+    measured from the tool tip, so it can further restrict that height.
+    This is a cutting-envelope limit, not a shaft/holder clearance test.
+    """
+    values = (radius, neck_radius, flute_length)
+    if (not all(isinstance(v, (int, float)) and math.isfinite(v) for v in values)
+            or radius <= 0 or not 0 < neck_radius < radius or flute_length <= radius):
+        raise DeburrError('lollipop requires a smaller positive neck and flutes above the ball center')
+    return min(math.sqrt(radius * radius - neck_radius * neck_radius),
+               flute_length - radius)
+
+
+def tool_tip(p, n1, n2, tool_axis, radius, width, max_contact_height=0.0):
     """Tool tip position (center - R * axis) for a vertical-axis ball endmill.
 
-    Raises DeburrError if the cut would need the upper half of the ball.
+    By default only the lower hemisphere cuts. A lollipop may supply its
+    validated upper contact height. Clearance must be checked separately.
     """
     z = normalize(tool_axis)
     center, u = ball_center(p, n1, n2, radius, width)
     for q in contact_points(p, n1, n2, u, width):
-        if dot(sub(q, center), z) > 1e-6:
-            raise DeburrError('edge is not reachable along the tool axis (undercut)')
+        if dot(sub(q, center), z) > max_contact_height + 1e-6:
+            raise DeburrError('edge is not reachable along the tool axis (undercut or neck contact)')
     return sub(center, scale(z, radius))

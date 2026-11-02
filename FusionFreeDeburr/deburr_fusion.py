@@ -17,6 +17,13 @@ PATH_TOL = 0.001           # tool-tip chord tolerance (0.01 mm)
 CONVEXITY_PROBE = 0.005     # lateral probe distance for convexity
 VERTEX_TOL = 1e-4           # cm; vertices this close are treated as the same
 TRACE_STRATEGY = 'trace'
+TRACE_EXPRESSIONS = (
+    ('compensation', "'center'"), ('compensationType', "'off'"),
+    ('axialOffset', '0 mm'), ('radialOffset', '0 mm'),
+    ('doLeadIn', 'false'), ('doLeadOut', 'false'),
+    ('preserveOrder', 'true'), ('orderByDepth', 'false'),
+    ('smoothingFilter', 'false'), ('retractionPolicy', "'full'"),
+    ('tolerance', '0.01 mm'))
 
 ATTR_GROUP = 'AdditionalToolpaths'
 ATTR_NAME = 'ballDeburr'
@@ -52,12 +59,14 @@ def _sample_edge(edge: adsk.fusion.BRepEdge, straight: bool):
     return [_tup(p) for p in points]
 
 
-def _refine_samples(edge, samples, radius, width, tool_axis):
+def _refine_samples(edge, samples, radius, width, tool_axis, cutter=None):
     """Split long spans or spans whose tool-tip midpoint misses the chord."""
     ev = edge.evaluator
     f1, f2 = edge.faces.item(0), edge.faces.item(1)
 
     def tip(p):
+        if cutter is not None:
+            return cutter.tip(p, _normal(f1, p), _normal(f2, p), tool_axis, width)
         return dm.tool_tip(p, _normal(f1, p), _normal(f2, p), tool_axis, radius, width)
 
     def split(a, b, pa, pb, ta, tb, depth):
@@ -126,7 +135,8 @@ def _check_convexity(edge, f1, f2, checks):
             raise dm.DeburrError('could not establish edge convexity')
 
 
-def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids) -> dc.Segment:
+def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids,
+                 cutter=None) -> dc.Segment:
     """Tool-tip path for one edge, oriented start vertex -> end vertex.
     Raises DeburrError if the edge can't be done."""
     if edge.faces.count != 2:
@@ -142,7 +152,10 @@ def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids)
         if len(samples) < 4 or len(set(samples[:-1])) < 3:
             raise dm.DeburrError('closed edge has too few sample points')
     if not straight:
-        samples = _refine_samples(edge, samples, radius, width, tool_axis)
+        if cutter is None:
+            samples = _refine_samples(edge, samples, radius, width, tool_axis)
+        else:
+            samples = _refine_samples(edge, samples, radius, width, tool_axis, cutter)
     if closed:
         samples = samples[:-1]
         if len(dc._clean(samples)) < 3:
@@ -161,7 +174,8 @@ def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids)
     tips, ends = [], []
     for k, p in enumerate(samples):
         n1, n2 = _normal(f1, p), _normal(f2, p)
-        tips.append(dm.tool_tip(p, n1, n2, tool_axis, radius, width))
+        tips.append(cutter.tip(p, n1, n2, tool_axis, width) if cutter is not None
+                    else dm.tool_tip(p, n1, n2, tool_axis, radius, width))
         if k in tangents:
             ends.append(dc.End(p, {id1: n1, id2: n2}, tangents[k]))
 
@@ -277,9 +291,7 @@ def _apply_curves(value: adsk.cam.CadContours2dParameterValue, curve_chains):
 
 def _trace_settings(op):
     """Paths already describe the tool tip: disable Trace displacement."""
-    for name, expression in (('compensation', "'center'"),
-                             ('compensationType', "'off'"),
-                             ('axialOffset', '0 mm'), ('radialOffset', '0 mm')):
+    for name, expression in TRACE_EXPRESSIONS:
         param = op.parameters.itemByName(name)
         if not param and name in ('compensation', 'axialOffset'):
             raise dm.DeburrError(f'Trace is missing required safety parameter: {name}')
@@ -319,8 +331,7 @@ def update_operation(design, op, chains, edges, width, tool=None):
     old_tool = op.tool
     value = _curves_parameter(op)
     old_curves = value.getCurveSelections()
-    params = [op.parameters.itemByName(n) for n in
-              ('compensation', 'compensationType', 'axialOffset', 'radialOffset')]
+    params = [op.parameters.itemByName(n) for n, _ in TRACE_EXPRESSIONS]
     expressions = [(p, p.expression) for p in params if p]
     old_attr = op.attributes.itemByName(ATTR_GROUP, ATTR_NAME).value
     sketch, curves = build_sketch(design, chains, op.name + ' (new)')

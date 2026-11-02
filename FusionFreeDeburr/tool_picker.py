@@ -1,4 +1,4 @@
-"""Floating HTML palette for picking a ball endmill. The command dialog stays
+"""Floating HTML palette for picking a supported endmill. The command dialog stays
 open while it's shown; the chosen entry id is passed back via a callback."""
 
 import json
@@ -56,7 +56,7 @@ def open_picker(catalog, units: adsk.core.UnitsManager, on_pick, tool_types=None
         _page_ready = False
         # Create it visible: a palette created hidden and shown later can leave
         # the embedded browser stuck at a tiny size.
-        _palette = _ui.palettes.add(PALETTE_ID, 'Select Ball Endmill', HTML_PATH.replace('\\', '/'),
+        _palette = _ui.palettes.add(PALETTE_ID, 'Select Deburr Tool', HTML_PATH.replace('\\', '/'),
                                     True, True, True, WIDTH, HEIGHT)
         handler = _IncomingHandler()
         _palette.incomingFromHTML.add(handler)

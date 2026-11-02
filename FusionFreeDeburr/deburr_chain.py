@@ -170,7 +170,7 @@ def find_crossing(a, b, axis):
     return None
 
 
-def corner_roll(a_end: End, b_start: End, tool_axis, radius, width):
+def corner_roll(a_end: End, b_start: End, tool_axis, radius, width, max_contact_height=0.0):
     """Tool-tip points rolling the ball around a convex vertex shared by two edges.
 
     The ball stays on the shared face while the other face's normal turns
@@ -205,7 +205,8 @@ def corner_roll(a_end: End, b_start: End, tool_axis, radius, width):
         tilt = tilt_a + (tilt_b - tilt_a) * t
         h = _rotate(h_a, n_shared, turn * t)
         n_other = dm.add(dm.scale(n_shared, math.cos(tilt)), dm.scale(h, math.sin(tilt)))
-        points.append(dm.tool_tip(a_end.vertex, n_shared, n_other, tool_axis, radius, width))
+        points.append(dm.tool_tip(a_end.vertex, n_shared, n_other, tool_axis, radius, width,
+                                  max_contact_height))
     return points
 
 
@@ -246,15 +247,21 @@ def _clean(points):
     return out
 
 
-def _corner(k, a_end, b_start, a_tip, b_tip, tool_axis, radius, width, depth, notes):
+def _corner(k, a_end, b_start, a_tip, b_tip, tool_axis, radius, width, depth, notes,
+            cutter=None):
     """Connector points for a convex corner. Candidates: rolling around the
     outside, and crossing over the vertex. With `depth` (max cut depth of a
     tool-tip path into the real part), the shallower one wins; otherwise the
     roll is preferred. Adds a note if even the best one cuts deeper than the
     edges themselves do at this corner; unsafe candidates split the paths."""
     candidates, errors = [], []
-    for make in (lambda: corner_roll(a_end, b_start, tool_axis, radius, width),
-                 lambda: vertex_crossing(a_tip, b_tip, a_end.vertex, tool_axis, radius)):
+    makers = ((lambda: corner_roll(a_end, b_start, tool_axis, radius, width)),
+              (lambda: vertex_crossing(a_tip, b_tip, a_end.vertex, tool_axis, radius)))
+    if cutter is not None:
+        # The vertex crossing does not model the finite upper cutting cap.
+        makers = (lambda: corner_roll(a_end, b_start, tool_axis, radius, width,
+                                      cutter.max_contact_height),)
+    for make in makers:
         try:
             points = make()
             points[0], points[-1] = a_tip, b_tip
@@ -283,7 +290,7 @@ def _corner(k, a_end, b_start, a_tip, b_tip, tool_axis, radius, width, depth, no
     return best
 
 
-def link_chain(segments, closed, tool_axis, radius, width, depth=None):
+def link_chain(segments, closed, tool_axis, radius, width, depth=None, cutter=None):
     """Turns an ordered chain of segments into connected pieces (end of each
     piece == start of the next; for closed chains the last connects to the first).
 
@@ -309,7 +316,7 @@ def link_chain(segments, closed, tool_axis, radius, width, depth=None):
             tips[n] = [point] + b[j + 1:]
             continue
         connectors[k] = _corner(k, segments[k].end, segments[n].start, a[-1], b[0],
-                                tool_axis, radius, width, depth, chain.notes)
+                                tool_axis, radius, width, depth, chain.notes, cutter)
 
     for k, seg in enumerate(segments):
         points = _clean(tips[k])

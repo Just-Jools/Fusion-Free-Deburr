@@ -18,6 +18,7 @@ import adsk.core
 import adsk.cam
 
 BALL_END_MILL = 'ball end mill'
+LOLLIPOP_MILL = 'lollipop mill'
 _UNIT_TO_CM = {'inches': 2.54, 'millimeters': 0.1}
 
 

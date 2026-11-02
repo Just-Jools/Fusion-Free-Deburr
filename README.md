@@ -4,7 +4,7 @@
 
 [![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue)](https://github.com/jkkicks/Fusion-Free-Deburr/releases) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 
-**Free 3-axis deburring toolpaths for Autodesk Fusion, using a ball end mill.**
+**Free 3-axis deburring toolpaths for Autodesk Fusion, using ball and lollipop end mills.**
 
 [Download the latest release](https://github.com/jkkicks/Fusion-Free-Deburr/releases)
 
@@ -34,7 +34,11 @@
 
 ## Use
 
-In **Manufacture > Milling > 3D > Ball Deburr**, select the edges, choose a ball end mill, set the edge-break width, and generate the toolpath. Right-click the operation to edit it later.
+In **Manufacture > Milling > 3D > Ball Deburr**, select the edges, choose a ball or lollipop end mill, set the edge-break width, and generate the toolpath. Right-click the operation to edit it later.
+
+Lollipop mills support undercut contact on accessible side-pocket rims and other convex edges. The cutter must be defined as a **lollipop mill**, with its spherical head, neck, shoulder length, shaft, and holder dimensions matching the physical tool. The add-in checks sampled cutting motion against solid setup models, fixtures, and other solid bodies in the design. It includes explicit approach and withdrawal moves outside the part before Fusion's Trace linking moves.
+
+A rim can be reachable by the head while the neck or shaft hits the part. In that case generation is rejected: use a tool with suitable neck reach or a setup that provides access. Repositioned manufacturing models and non-solid setup selections are currently unsupported. These checks use the finished model, not a simulation of remaining stock; simulate with the actual stock and workholding before machining.
 
 ![Creating a Ball Deburr toolpath in Fusion](docs/images/readme/ball-deburr-walkthrough.gif)
 

@@ -11,16 +11,16 @@ import adsk.core
 import adsk.fusion
 import adsk.cam
 
-from . import deburr_math, deburr_chain, deburr_fusion, cam_tools, tool_picker, ball_deburr_command
+from . import deburr_math, deburr_chain, deburr_fusion, cutter_profile, lollipop_fusion, cam_tools, tool_picker, ball_deburr_command
 
 # Stop/Run in Fusion doesn't re-import submodules; reload so edits take effect.
 # Order matters: dependencies before the modules that import them.
-for _module in (deburr_math, deburr_chain, deburr_fusion, cam_tools, tool_picker, ball_deburr_command):
+for _module in (deburr_math, deburr_chain, deburr_fusion, cutter_profile, lollipop_fusion, cam_tools, tool_picker, ball_deburr_command):
     importlib.reload(_module)
 
 CMD_ID = 'additionalToolpaths_ballDeburr'
 CMD_NAME = 'Ball Deburr'
-CMD_TOOLTIP = ('Generate edge-break geometry and a trace toolpath for a ball endmill.\n'
+CMD_TOOLTIP = ('Generate edge-break geometry and a trace toolpath for a ball or lollipop endmill.\n'
                'Select an existing Ball Deburr operation first to edit it.')
 # Right-click menu entry on Ball Deburr operations; runs the same command,
 # which opens in edit mode for the selected operation.
@@ -154,6 +154,7 @@ def run(context):
 
 def stop(context):
     try:
+        ball_deburr_command.stop()
         for ws_id, panel_id in PANEL_CANDIDATES:
             ws = _ui.workspaces.itemById(ws_id)
             panel = ws.toolbarPanels.itemById(panel_id) if ws else None

@@ -56,6 +56,34 @@ class BallCenterTests(unittest.TestCase):
         with self.assertRaises(dm.DeburrError):
             dm.tool_tip((0, 0, 0), (0, 0, -1), (1, 0, 0), Z, 0.3, 0.05)
 
+    def test_lollipop_reaches_bottom_edge(self):
+        r, w = .4, .02
+        limit = dm.lollipop_contact_height(r, .2, .8)
+        p, n1, n2 = (0, 0, 0), (0, 0, -1), (1, 0, 0)
+        tip = dm.tool_tip(p, n1, n2, Z, r, w, limit)
+        center, u = dm.ball_center(p, n1, n2, r, w)
+        self.assertAlmostEqual(dist(dm.add(tip, dm.scale(Z, r)), center), 0)
+        for q in dm.contact_points(p, n1, n2, u, w):
+            self.assertAlmostEqual(dist(q, center), r)
+
+    def test_lollipop_neck_and_flutes_limit_contact(self):
+        for neck, flutes in ((.39, .8), (.2, .45)):
+            limit = dm.lollipop_contact_height(.4, neck, flutes)
+            with self.assertRaises(dm.DeburrError):
+                dm.tool_tip((0, 0, 0), (0, 0, -1), (1, 0, 0), Z, .4, .02, limit)
+
+    def test_lollipop_invalid_dimensions(self):
+        for values in ((0, .2, .8), (.4, 0, .8), (.4, .4, .8),
+                       (.4, .2, .4), (.4, .2, float('nan'))):
+            with self.assertRaises(dm.DeburrError):
+                dm.lollipop_contact_height(*values)
+
+    def test_lollipop_contact_rotates_with_setup(self):
+        limit = dm.lollipop_contact_height(.4, .2, .8)
+        a = dm.tool_tip((0, 0, 0), (0, 0, -1), (1, 0, 0), Z, .4, .02, limit)
+        b = dm.tool_tip((0, 0, 0), (-1, 0, 0), (0, 0, 1), (1, 0, 0), .4, .02, limit)
+        self.assertEqual(b, (a[2], a[1], a[0]))
+
 
 if __name__ == '__main__':
     unittest.main()
