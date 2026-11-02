@@ -390,6 +390,25 @@ def _capture_job(inputs: adsk.core.CommandInputs, session):
                      tool.toJson(), bool(op and is_current_tool))
 
 
+def _job_tool(cam, job):
+    if job.keep_current_tool:
+        return job.operation.tool
+    snapshot = json.loads(job.tool_json)
+    matching_guid = False
+    for tool in cam.documentToolLibrary:
+        current = json.loads(tool.toJson())
+        if current.get('guid') != snapshot.get('guid') or not snapshot.get('guid'):
+            continue
+        matching_guid = True
+        if current == snapshot:
+            # Preserve Fusion's internal document-tool ID. Reimporting JSON
+            # does not preserve that ID, even if its public GUID is unchanged.
+            return tool
+    if matching_guid:
+        raise dm.DeburrError('The selected tool changed; run Deburr again to use its current definition.')
+    return adsk.cam.Tool.createFromJson(job.tool_json)
+
+
 def _apply_job(job):
     """Apply accepted input after the dialog's transaction has committed."""
     if not job.document.isValid or _app.activeDocument != job.document:
@@ -405,7 +424,7 @@ def _apply_job(job):
     op, setup, width = job.operation, job.setup, job.width
     if op and op.parentSetup != setup:
         raise dm.DeburrError('The operation moved to another setup; run Deburr again.')
-    tool = op.tool if job.keep_current_tool else adsk.cam.Tool.createFromJson(job.tool_json)
+    tool = _job_tool(cam, job)
     cutter = None
     if cam_tools.tool_type(tool) == cam_tools.LOLLIPOP_MILL:
         cutter = cutter_profile.from_tool_json(json.loads(tool.toJson()))

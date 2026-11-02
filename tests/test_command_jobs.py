@@ -1,6 +1,7 @@
 """Prevent dialog transactions from containing cross-product Design/CAM edits."""
 from contextlib import ExitStack
 import importlib
+import json
 import sys
 import unittest
 from types import SimpleNamespace as NS
@@ -145,3 +146,27 @@ class CommandJobTests(unittest.TestCase):
         job = cmd.DeburrJob(doc, NS(isValid=True), NS(isValid=False), (), .02, '{}', True)
         with self.assertRaisesRegex(dm.DeburrError, 'no longer exists'):
             cmd._apply_job(job)
+
+    def test_new_operation_reuses_the_existing_document_tool_object(self):
+        raw = {'guid': 'tool-id', 'geometry': {'DC': 8}}
+        tool = NS(toJson=lambda: json.dumps(raw))
+        job = NS(keep_current_tool=False, tool_json=json.dumps(raw))
+        with patch.object(adsk.cam.Tool, 'createFromJson') as create:
+            self.assertIs(cmd._job_tool(NS(documentToolLibrary=[tool]), job), tool)
+            create.assert_not_called()
+
+    def test_external_library_tool_is_imported_only_when_not_in_document(self):
+        raw = json.dumps({'guid': 'external-tool'})
+        job = NS(keep_current_tool=False, tool_json=raw)
+        with patch.object(adsk.cam.Tool, 'createFromJson') as create:
+            self.assertIs(cmd._job_tool(NS(documentToolLibrary=[]), job), create.return_value)
+            create.assert_called_once_with(raw)
+
+    def test_changed_document_tool_is_not_silently_reimported(self):
+        tool = NS(toJson=lambda: json.dumps({'guid': 'tool-id', 'geometry': {'DC': 10}}))
+        job = NS(keep_current_tool=False,
+                 tool_json=json.dumps({'guid': 'tool-id', 'geometry': {'DC': 8}}))
+        with patch.object(adsk.cam.Tool, 'createFromJson') as create:
+            with self.assertRaisesRegex(dm.DeburrError, 'selected tool changed'):
+                cmd._job_tool(NS(documentToolLibrary=[tool]), job)
+            create.assert_not_called()
