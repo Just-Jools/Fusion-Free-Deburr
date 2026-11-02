@@ -88,3 +88,17 @@ passed clearance checks at 2,155 sampled positions. Generated feed vertices were
 within 0.000067 mm of the stored sketch polyline (excluding the intentional final
 feed retract). The diagnostic post emits CSV, not machine code. The tool definition
 had no holder, so this check does not establish clearance for an added physical holder.
+
+Top-access verification (2026-11-02): the document's test tool was revised to
+35 mm shoulder reach with the original 8 mm head and 4 mm neck. The first shaft
+segment was shortened from 50 to 35 mm to retain the 75 mm overall length. Fusion
+initially normalized the replacement tool's neck to 6 mm, which correctly failed
+the contact check; explicitly setting the document tool's shoulder diameter to
+4 mm restored the intended geometry. New-operation jobs now reuse an unchanged
+document tool object rather than reimporting its JSON and losing its internal ID.
+The `Lollipop Deburr - Top Access Test` operation in `Deburr New` generated all
+four rim edges at 0.2 mm with a +Z tool axis, with no warnings or errors. Its
+exported 82 moves passed clearance checks at 3,346 sampled positions. The revised
+tool was also propagated to the underside operation, which regenerated successfully.
+All nine document operations remained valid. These are modeled test-tool dimensions;
+a physical cutter and holder must match the library definition for machining.
