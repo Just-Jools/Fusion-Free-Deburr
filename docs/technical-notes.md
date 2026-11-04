@@ -127,5 +127,10 @@ body or occurrence before sampling and saving operation settings. Resolution
 requires native body identity, matching placement matrices, and matching bounds;
 unrelated bodies and repositioned manufacturing proxies remain unsupported.
 Regression tests cover root and occurrence picks, retained native picks, rejected
-translations and symmetric rotations, and failed edge proxy creation. The three
-manual create/reopen/ball-edit checks still require a rerun in Fusion after reload.
+translations and symmetric rotations, and failed edge proxy creation.
+
+After reloading the fix, the user confirmed all three manual Fusion checks passed:
+creating a new lollipop operation in `Deburr New` with the four front side-pocket
+rim edges, the 35 mm-reach tool, and 0.2 mm width; reopening it with `Edit Deburr`
+and confirming the edges, tool, and width before canceling; and editing
+`Ball Deburr - Kidney Pocket` without changes and regenerating successfully.
