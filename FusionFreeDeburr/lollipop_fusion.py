@@ -18,6 +18,39 @@ CLEARANCE_STEP = .01  # cm, 0.1 mm maximum motion spacing
 CLEARANCE_MARGIN = .001  # cm, 0.01 mm
 
 
+def _same_body_placement(body, candidate):
+    if (body.nativeObject or body) != (candidate.nativeObject or candidate):
+        return False
+    def transform(entity):
+        context = entity.assemblyContext
+        return (context.transform2.asArray() if context else
+                [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+    if any(abs(a - b) > 1e-6 for a, b in zip(transform(body), transform(candidate))):
+        return False
+    a, b = body.boundingBox, candidate.boundingBox
+    return (dc.dist(df._tup(a.minPoint), df._tup(b.minPoint)) < 1e-6 and
+            dc.dist(df._tup(a.maxPoint), df._tup(b.maxPoint)) < 1e-6)
+
+
+def setup_edges(edges, bodies):
+    """Resolve CAM picks into the design context used for clearance and tokens."""
+    result = []
+    for edge in edges:
+        if edge.body in bodies:
+            result.append(edge)
+            continue
+        body = next((b for b in bodies if _same_body_placement(edge.body, b)), None)
+        if body is None:
+            raise dm.DeburrError('selected lollipop edges must belong to the setup models')
+        native = edge.nativeObject or edge
+        mapped = (native.createForAssemblyContext(body.assemblyContext)
+                  if body.assemblyContext else native)
+        if mapped is None or mapped.body != body:
+            raise dm.DeburrError('could not resolve selected lollipop edge in the setup model')
+        result.append(mapped)
+    return result
+
+
 def setup_obstacles(setup, design):
     def expand(entities):
         result = []
@@ -38,13 +71,8 @@ def setup_obstacles(setup, design):
     def canonical(body):
         # CAM wraps even root bodies in a manufacturing occurrence. Resolve
         # that proxy by native identity AND placement, never just by name.
-        native = body.nativeObject or body
         for candidate in all_bodies:
-            if (candidate.nativeObject or candidate) != native:
-                continue
-            a, b = body.boundingBox, candidate.boundingBox
-            if (dc.dist(df._tup(a.minPoint), df._tup(b.minPoint)) < 1e-6 and
-                    dc.dist(df._tup(a.maxPoint), df._tup(b.maxPoint)) < 1e-6):
+            if _same_body_placement(body, candidate):
                 return candidate
         raise dm.DeburrError('repositioned manufacturing models are not supported for lollipop paths')
     bodies = [canonical(b) for b in expand(setup.models)]
@@ -66,6 +94,14 @@ def _overlap(a0, a1, b):
     box = b.boundingBox
     lo, hi = df._tup(box.minPoint), df._tup(box.maxPoint)
     return all(a0[k] <= hi[k] and a1[k] >= lo[k] for k in range(3))
+
+
+def _cylinder_bounds(a, b, radius, axis):
+    # A cylinder has no radial extent along its axis. Using radius in all
+    # three coordinates needlessly intersects holders high above the part.
+    extent = [radius * math.sqrt(max(0, 1 - axis[k] * axis[k])) for k in range(3)]
+    return (tuple(min(a[k], b[k]) - extent[k] for k in range(3)),
+            tuple(max(a[k], b[k]) + extent[k] for k in range(3)))
 
 
 class Clearance:
@@ -100,8 +136,7 @@ class Clearance:
             a = dm.add(tip, dm.scale(self.axis, bottom - margin))
             b = dm.add(tip, dm.scale(self.axis, top + margin))
             r = radius + margin
-            lo = tuple(min(a[k], b[k]) - r for k in range(3))
-            hi = tuple(max(a[k], b[k]) + r for k in range(3))
+            lo, hi = _cylinder_bounds(a, b, r, self.axis)
             for body in obstacles:
                 if not _overlap(lo, hi, body):
                     continue
@@ -187,9 +222,8 @@ def build_chains(edges, cutter, width, tool_axis, bodies, fixtures=()):
     if not edges or not math.isfinite(width) or width <= 0:
         raise dm.DeburrError('select edges and a positive finite edge break')
     axis = dm.normalize(tool_axis)
+    edges = setup_edges(edges, bodies)
     clearance = Clearance(cutter, axis, bodies, fixtures, width)
-    if any(edge.body not in clearance.bodies for edge in edges):
-        raise dm.DeburrError('selected lollipop edges must belong to the setup models')
     ids = df._FaceIds()
     segments = [df.edge_segment(e, cutter.radius, width, axis, ids, cutter) for e in edges]
     chains, notes = [], []

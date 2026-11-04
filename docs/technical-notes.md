@@ -102,3 +102,30 @@ exported 82 moves passed clearance checks at 3,346 sampled positions. The revise
 tool was also propagated to the underside operation, which regenerated successfully.
 All nine document operations remained valid. These are modeled test-tool dimensions;
 a physical cutter and holder must match the library definition for machining.
+
+Assembly and fixture regression checks (2026-11-02): the existing document's
+Maritool CAT40-ER32-2.35 holder was applied to a temporary QA lollipop assembly
+with 50 mm stickout. Fusion generated a valid Trace without warnings; all 95
+exported moves passed clearance checks at 4,201 sampled positions. A separate
+40 mm-stickout case was rejected for assembly interference. Temporary solid
+fixture checks accepted a remote clamp and rejected a clamp at the cutter path.
+These exercised Fusion's BRep kernel; the fixtures were temporary solids and were
+not retained in the setup. The QA operation, driving sketch, and tool were removed
+afterward, leaving the original nine operations and two tools.
+
+Noncutting-cylinder broad-phase bounds now use the radius projected perpendicular
+to the tool axis. Sections entirely above the model can be excluded without
+constructing and intersecting a temporary solid; rotated-axis bounds and the
+above-part holder case have focused regression coverage. The UI command is named
+`Deburr`, and the context-menu command is `Edit Deburr`; their internal IDs stay
+unchanged so existing operation metadata and toolbar references remain compatible.
+
+Manual new-operation QA (2026-11-04) exposed a selected-edge context mismatch:
+CAM-picked lollipop edges were rejected after setup bodies had already been
+resolved to design bodies. Selected edges now resolve to the matching design
+body or occurrence before sampling and saving operation settings. Resolution
+requires native body identity, matching placement matrices, and matching bounds;
+unrelated bodies and repositioned manufacturing proxies remain unsupported.
+Regression tests cover root and occurrence picks, retained native picks, rejected
+translations and symmetric rotations, and failed edge proxy creation. The three
+manual create/reopen/ball-edit checks still require a rerun in Fusion after reload.

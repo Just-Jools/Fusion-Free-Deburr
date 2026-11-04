@@ -1,5 +1,6 @@
 """Undercut linking, side access, and clearance regressions."""
 import importlib
+import math
 import unittest
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock, patch
@@ -12,11 +13,35 @@ with patch.dict('sys.modules', {'adsk': adsk, 'adsk.core': adsk.core,
 
 
 class LollipopTests(unittest.TestCase):
+    def test_rotated_cylinder_bounds_use_radial_projection(self):
+        component = math.sqrt(.5)
+        lo, hi = lf._cylinder_bounds((0, 0, 0), (1, 0, 1), 2,
+                                     (component, 0, component))
+        self.assertAlmostEqual(lo[0], -math.sqrt(2))
+        self.assertAlmostEqual(lo[1], -2)
+        self.assertAlmostEqual(lo[2], -math.sqrt(2))
+        self.assertAlmostEqual(hi[0], 1 + math.sqrt(2))
+        self.assertAlmostEqual(hi[2], 1 + math.sqrt(2))
+
+    def test_holder_above_part_skips_intersection_without_ignoring_head(self):
+        outside = adsk.fusion.PointContainment.PointOutsidePointContainment
+        body = NS(pointContainment=lambda p: outside,
+                  boundingBox=NS(minPoint=NS(x=-5, y=-4, z=0),
+                                 maxPoint=NS(x=6, y=4, z=4.7)))
+        cutter = NS(radius=.4, noncutting_sections=((5, 8, 3.2),))
+        check = lf.Clearance(cutter, (0, 0, 1), [body], [], .02)
+        check.measure = MagicMock()
+        check.measure.measureMinimumDistance.return_value.value = .4
+        check.temp = MagicMock()
+        self.assertIsNone(check.point((0, 0, 0), .001))
+        check.temp.createCylinderOrCone.assert_not_called()
+        check.measure.measureMinimumDistance.assert_called_once()
+
     def test_cam_proxy_resolves_to_design_body_by_identity_and_placement(self):
         def box(x=0):
             return NS(minPoint=NS(x=x, y=0, z=0), maxPoint=NS(x=x+1, y=1, z=1))
-        body = NS(isSolid=True, nativeObject=None, boundingBox=box())
-        proxy = NS(isSolid=True, nativeObject=body, boundingBox=box())
+        body = NS(isSolid=True, nativeObject=None, boundingBox=box(), assemblyContext=None)
+        proxy = NS(isSolid=True, nativeObject=body, boundingBox=box(), assemblyContext=None)
         design = NS(rootComponent=NS(bRepBodies=[body], allOccurrences=[]))
         setup = NS(models=[proxy], fixtures=[])
         with patch.object(adsk.fusion.BRepBody, 'cast', side_effect=lambda e: e), \
@@ -27,6 +52,59 @@ class LollipopTests(unittest.TestCase):
             proxy.boundingBox = box(.1)
             with self.assertRaisesRegex(dm.DeburrError, 'repositioned manufacturing'):
                 lf.setup_obstacles(setup, design)
+
+    def test_selected_cam_edges_resolve_into_design_and_keep_native_picks(self):
+        box = NS(minPoint=NS(x=0, y=0, z=0), maxPoint=NS(x=1, y=1, z=1))
+        body = NS(nativeObject=None, assemblyContext=None, boundingBox=box)
+        proxy = NS(nativeObject=body, assemblyContext=None, boundingBox=box)
+        native = NS(body=body, nativeObject=None)
+        picked = NS(body=proxy, nativeObject=native)
+        resolved = lf.setup_edges([picked, native], [body])
+        self.assertIs(resolved[0], native)
+        self.assertIs(resolved[1], native)
+        with patch.object(lf, 'Clearance'), patch.object(lf, '_directions', return_value=[]), \
+                patch.object(lf.df, 'edge_segment', return_value='segment') as sample, \
+                patch.object(lf.dc, 'order_chains', return_value=[]):
+            chains, used, notes = lf.build_chains([picked], NS(radius=.4), .02,
+                                                 (0, 0, 1), [body])
+        self.assertIs(sample.call_args.args[0], native)
+        self.assertIs(used[0], native)
+
+    def test_selected_cam_edge_retains_design_occurrence_placement(self):
+        box = NS(minPoint=NS(x=2, y=0, z=0), maxPoint=NS(x=3, y=1, z=1))
+        matrix = [1, 0, 0, 2, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        context = NS(transform2=NS(asArray=lambda: matrix))
+        native_body = NS(nativeObject=None, assemblyContext=None)
+        body = NS(nativeObject=native_body, assemblyContext=context, boundingBox=box)
+        proxy = NS(nativeObject=native_body, assemblyContext=NS(
+            transform2=NS(asArray=lambda: list(matrix))), boundingBox=box)
+        mapped = NS(body=body)
+        native = NS(createForAssemblyContext=MagicMock(return_value=mapped))
+        self.assertIs(lf.setup_edges([NS(body=proxy, nativeObject=native)], [body])[0], mapped)
+        native.createForAssemblyContext.assert_called_once_with(context)
+
+    def test_selected_edge_rejects_wrong_model_translation_and_symmetric_rotation(self):
+        box = NS(minPoint=NS(x=-1, y=-1, z=-1), maxPoint=NS(x=1, y=1, z=1))
+        body = NS(nativeObject=None, assemblyContext=None, boundingBox=box)
+        wrong = NS(nativeObject=None, assemblyContext=None, boundingBox=box, other=True)
+        translated = [1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        rotated = [-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        proxies = [wrong] + [NS(nativeObject=body, boundingBox=box, assemblyContext=NS(
+            transform2=NS(asArray=lambda m=m: m))) for m in (translated, rotated)]
+        for proxy in proxies:
+            with self.subTest(proxy=proxy), self.assertRaisesRegex(dm.DeburrError, 'must belong'):
+                lf.setup_edges([NS(body=proxy)], [body])
+
+    def test_unresolvable_edge_proxy_is_rejected(self):
+        box = NS(minPoint=NS(x=0, y=0, z=0), maxPoint=NS(x=1, y=1, z=1))
+        context = NS(transform2=NS(asArray=lambda: [1, 0, 0, 0, 0, 1, 0, 0,
+                                                   0, 0, 1, 0, 0, 0, 0, 1]))
+        native_body = NS(nativeObject=None)
+        body = NS(nativeObject=native_body, boundingBox=box, assemblyContext=context)
+        proxy = NS(nativeObject=native_body, boundingBox=box, assemblyContext=None)
+        native = NS(createForAssemblyContext=lambda c: None)
+        with self.assertRaisesRegex(dm.DeburrError, 'could not resolve'):
+            lf.setup_edges([NS(body=proxy, nativeObject=native)], [body])
 
     def test_trace_preserves_approach_and_withdrawal_geometry(self):
         params = {name: NS(expression='unsafe') for name, _ in fusion.TRACE_EXPRESSIONS}

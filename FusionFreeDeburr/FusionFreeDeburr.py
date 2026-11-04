@@ -1,6 +1,6 @@
 """Fusion Free Deburr - Fusion add-in entry point.
 
-Registers the Ball Deburr button; the command itself lives in ball_deburr_command.py.
+Registers the Deburr button; the command itself lives in ball_deburr_command.py.
 """
 
 import importlib
@@ -19,14 +19,14 @@ for _module in (deburr_math, deburr_chain, deburr_fusion, cutter_profile, lollip
     importlib.reload(_module)
 
 CMD_ID = 'additionalToolpaths_ballDeburr'
-CMD_NAME = 'Ball Deburr'
+CMD_NAME = 'Deburr'
 CMD_TOOLTIP = ('Generate edge-break geometry and a trace toolpath for a ball or lollipop endmill.\n'
-               'Select an existing Ball Deburr operation first to edit it.')
-# Right-click menu entry on Ball Deburr operations; runs the same command,
+               'Select an existing Deburr operation first to edit it.')
+# Right-click menu entry on Deburr operations; runs the same command,
 # which opens in edit mode for the selected operation.
 EDIT_CMD_ID = 'additionalToolpaths_editBallDeburr'
-EDIT_CMD_NAME = 'Edit Ball Deburr'
-EDIT_CMD_TOOLTIP = 'Edit the edges, tool, or edge break width of this Ball Deburr operation.'
+EDIT_CMD_NAME = 'Edit Deburr'
+EDIT_CMD_TOOLTIP = 'Edit the edges, tool, or edge break width of this Deburr operation.'
 # Icons are required for the button to be pinnable to the toolbar.
 CMD_RESOURCES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'resources', 'BallDeburr')
 

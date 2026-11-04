@@ -34,7 +34,7 @@
 
 ## Use
 
-In **Manufacture > Milling > 3D > Ball Deburr**, select the edges, choose a ball or lollipop end mill, set the edge-break width, and generate the toolpath. Right-click the operation to edit it later.
+In **Manufacture > Milling > 3D > Deburr**, select the edges, choose a ball or lollipop end mill, set the edge-break width, and generate the toolpath. Right-click the operation and choose **Edit Deburr** to edit it later.
 
 Lollipop mills support undercut contact on accessible side-pocket rims and other convex edges. The cutter must be defined as a **lollipop mill**, with its spherical head, neck, shoulder length, shaft, and holder dimensions matching the physical tool. The add-in checks sampled cutting motion against solid setup models, fixtures, and other solid bodies in the design. It includes explicit approach and withdrawal moves outside the part before Fusion's Trace linking moves.
 

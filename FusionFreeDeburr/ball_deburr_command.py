@@ -1,4 +1,4 @@
-"""The Ball Deburr command: dialog, create, and edit of deburr trace operations."""
+"""The Deburr command: dialog, create, and edit of deburr trace operations."""
 
 import math
 import json
