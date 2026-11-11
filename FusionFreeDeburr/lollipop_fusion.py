@@ -16,6 +16,7 @@ from . import deburr_fusion as df
 
 CLEARANCE_STEP = .01  # cm, 0.1 mm maximum motion spacing
 CLEARANCE_MARGIN = .001  # cm, 0.01 mm
+CENTER_ENDPOINT_SEPARATION = .1  # cm; keep Trace from treating entry/exit as closed
 
 
 def _same_body_placement(body, candidate):
@@ -193,12 +194,46 @@ def _directions(edges, axis):
     return unique
 
 
+def _center_access(points, clearance):
+    """Approach a closed internal rim radially from its clear centre.
+
+    Every possible seam is checked because a bore may be partly obstructed.
+    The withdrawal endpoint is displaced slightly along the tool axis so the
+    complete approach/cut/withdrawal curve remains open for Trace.
+    """
+    if len(points) < 4 or dc.dist(points[0], points[-1]) > dc.JOIN_TOL:
+        return None
+    center = dc.closed_path_center(points)
+    if clearance.point(center, CLEARANCE_MARGIN):
+        return None
+
+    exits = [dm.add(center, dm.scale(clearance.axis, sign * CENTER_ENDPOINT_SEPARATION))
+             for sign in (1, -1)]
+    ring = points[:-1]
+    # Try the closest seam first; this normally gives the shortest radial move.
+    order = sorted(range(len(ring)), key=lambda i: dc.dist(center, ring[i]))
+    for i in order:
+        cut = dc.rotate_closed_path(points, i)
+        seam = cut[0]
+        if clearance.path([center, seam]) is not None:
+            continue
+        for exit_point in exits:
+            if (clearance.point(exit_point, CLEARANCE_MARGIN) is None and
+                    clearance.path([seam, center, exit_point]) is None):
+                return [center] + cut + [center, exit_point]
+    return None
+
+
 def add_access(points, directions, clearance):
     """Move horizontally (or upward) outside every obstacle before Trace links.
 
     Return an open curve even when the cutting contour is closed. Trace must
     start and finish at the exterior endpoints, rather than choose a seam.
     """
+    center_path = _center_access(points, clearance)
+    if center_path is not None:
+        return center_path
+
     corners = [p for body in clearance.bodies + clearance.fixtures for p in _box_corners(body)]
     envelope = max([clearance.cutter.radius] +
                    [r for _, _, r in clearance.cutter.noncutting_sections])
