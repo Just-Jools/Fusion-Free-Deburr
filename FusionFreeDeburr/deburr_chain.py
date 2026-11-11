@@ -37,13 +37,15 @@ class Segment:
     tips: list               # tool-tip points along the edge, start -> end
     start: End
     end: End
+    contacts: list = field(default_factory=list)  # matching points on the selected model edge
     start_key: object = None  # vertex identity, for chaining
     end_key: object = None
     closed: bool = False      # a single closed edge (e.g. a full circle)
     source: object = None     # caller's data (e.g. the BRepEdge)
 
     def reversed(self):
-        return replace(self, tips=self.tips[::-1], start=self.end, end=self.start,
+        return replace(self, tips=self.tips[::-1], contacts=self.contacts[::-1],
+                       start=self.end, end=self.start,
                        start_key=self.end_key, end_key=self.start_key)
 
 
