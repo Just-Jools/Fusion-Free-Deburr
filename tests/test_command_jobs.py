@@ -2,6 +2,7 @@
 from contextlib import ExitStack
 import importlib
 import json
+import math
 import sys
 import unittest
 from types import SimpleNamespace as NS
@@ -71,7 +72,11 @@ class CommandJobTests(unittest.TestCase):
         edges = [NS(entityToken='edge-a'), NS(entityToken='edge-b')]
         selection = NS(selectionCount=2, selection=lambda i: NS(entity=edges[i]))
         width = NS(value=.025)
-        values = {cmd.IN_EDGES: selection, cmd.IN_WIDTH: width}
+        side_clearance = NS(value=.075)
+        lead_angle = NS(value=math.pi / 3)
+        values = {cmd.IN_EDGES: selection, cmd.IN_WIDTH: width,
+                  cmd.IN_SIDE_CLEARANCE: side_clearance,
+                  cmd.IN_LEAD_ANGLE: lead_angle}
         inputs = NS(itemById=values.get)
         tool = NS(toJson=lambda: '{"type":"lollipop mill"}')
         with patch.object(cmd, '_selected_tool', return_value=('tool', tool, True, None)), \
@@ -86,6 +91,8 @@ class CommandJobTests(unittest.TestCase):
         self.assertIs(job.operation, op)
         self.assertEqual(job.edge_tokens, ('edge-a', 'edge-b'))
         self.assertEqual(job.width, .025)
+        self.assertEqual(job.side_clearance, .075)
+        self.assertEqual(job.lead_angle, math.pi / 3)
         self.assertTrue(job.keep_current_tool)
 
     def test_old_dialog_destroy_does_not_clear_new_session(self):

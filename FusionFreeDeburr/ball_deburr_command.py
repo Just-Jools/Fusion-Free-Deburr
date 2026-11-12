@@ -21,12 +21,16 @@ IN_TOOL = 'tool'
 IN_PICK = 'pickTool'
 IN_DIAMETER = 'ballDiameter'
 IN_WIDTH = 'breakWidth'
+IN_SIDE_CLEARANCE = 'sideEntryClearance'
+IN_LEAD_ANGLE = 'sideLeadAngle'
 
 NEW_OP_LABEL = 'New operation'
 TOOL_TYPES = {cam_tools.BALL_END_MILL, cam_tools.LOLLIPOP_MILL}
 DEFAULT_NAME = 'Ball Deburr'
 DEFAULT_WIDTH = {'in': '0.02 in'}  # anything else falls back to mm
 DEFAULT_WIDTH_MM = '0.5 mm'
+DEFAULT_SIDE_CLEARANCE = '0.5 mm'
+DEFAULT_LEAD_ANGLE = '90 deg'
 
 _app: adsk.core.Application = None
 _ui: adsk.core.UserInterface = None
@@ -50,6 +54,8 @@ class DeburrJob:
     width: float
     tool_json: str
     keep_current_tool: bool
+    side_clearance: float = .05
+    lead_angle: float = math.pi / 2
 
 
 def init(app, ui, log, handlers):
@@ -165,6 +171,12 @@ def _set_mode(inputs: adsk.core.CommandInputs, op):
 
     if settings:
         adsk.core.ValueCommandInput.cast(inputs.itemById(IN_WIDTH)).value = settings['width']
+        adsk.core.ValueCommandInput.cast(inputs.itemById(IN_SIDE_CLEARANCE)).value = \
+            settings.get('side_clearance', adsk.core.ValueCommandInput.cast(
+                inputs.itemById(IN_SIDE_CLEARANCE)).value)
+        adsk.core.ValueCommandInput.cast(inputs.itemById(IN_LEAD_ANGLE)).value = \
+            settings.get('lead_angle', adsk.core.ValueCommandInput.cast(
+                inputs.itemById(IN_LEAD_ANGLE)).value)
 
 
 def _fill_tools(inputs: adsk.core.CommandInputs, select_id=None):
@@ -286,6 +298,10 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             units = s.units.defaultLengthUnits
             inputs.addValueInput(IN_WIDTH, 'Edge break width', units,
                                  adsk.core.ValueInput.createByString(DEFAULT_WIDTH.get(units, DEFAULT_WIDTH_MM)))
+            inputs.addValueInput(IN_SIDE_CLEARANCE, 'Side-entry clearance', units,
+                                 adsk.core.ValueInput.createByString(DEFAULT_SIDE_CLEARANCE))
+            inputs.addValueInput(IN_LEAD_ANGLE, 'Side lead-in angle', 'deg',
+                                 adsk.core.ValueInput.createByString(DEFAULT_LEAD_ANGLE))
 
             _set_mode(inputs, s.ops[preselected - 1] if preselected else None)
         except:
@@ -377,6 +393,16 @@ def _capture_job(inputs: adsk.core.CommandInputs, session):
         raise ValueError('Edge break width must be positive and finite.')
     if not edges or any(edge is None for edge in edges):
         raise ValueError('Select sharp convex edges to deburr.')
+    clearance_input = adsk.core.ValueCommandInput.cast(inputs.itemById(IN_SIDE_CLEARANCE))
+    angle_input = adsk.core.ValueCommandInput.cast(inputs.itemById(IN_LEAD_ANGLE))
+    # Defaults also keep jobs captured by older dialogs/tests compatible while
+    # an add-in reload replaces the previous command definition.
+    side_clearance = clearance_input.value if clearance_input else .05  # cm
+    lead_angle = angle_input.value if angle_input else math.pi / 2  # radians
+    if not math.isfinite(side_clearance) or side_clearance < 0:
+        raise ValueError('Side-entry clearance must be finite and zero or greater.')
+    if not math.isfinite(lead_angle) or lead_angle <= 0 or lead_angle > 2 * math.pi:
+        raise ValueError('Side lead-in angle must be greater than 0 and no more than 360 degrees.')
 
     op = s.edit_op
     if op:
@@ -387,7 +413,8 @@ def _capture_job(inputs: adsk.core.CommandInputs, session):
 
     return DeburrJob(s.document, setup, op,
                      tuple(edge.entityToken for edge in edges), width,
-                     tool.toJson(), bool(op and is_current_tool))
+                     tool.toJson(), bool(op and is_current_tool),
+                     side_clearance, lead_angle)
 
 
 def _job_tool(cam, job):
@@ -439,7 +466,8 @@ def _apply_job(job):
     if cutter is not None:
         bodies, fixtures = lollipop_fusion.setup_obstacles(setup, design)
         chains, used_edges, warnings = lollipop_fusion.build_chains(
-            edges, cutter, width, tool_axis, bodies, fixtures)
+            edges, cutter, width, tool_axis, bodies, fixtures,
+            job.side_clearance, job.lead_angle)
     else:
         chains, used_edges, warnings = deburr_fusion.build_chains(edges, radius, width, tool_axis)
     for msg in warnings:
@@ -452,7 +480,8 @@ def _apply_job(job):
     if op:
         sketch = deburr_fusion.update_operation(
             design, op, chains, used_edges, width,
-            None if job.keep_current_tool else tool)
+            None if job.keep_current_tool else tool,
+            job.side_clearance, job.lead_angle)
         cam.generateToolpath(op)
         verb = 'Updated'
     else:
@@ -460,7 +489,8 @@ def _apply_job(job):
         sketch, curve_chains = deburr_fusion.build_sketch(design, chains, name)
         try:
             op = deburr_fusion.create_trace(setup, curve_chains, name, tool)
-            deburr_fusion.save_settings(op, used_edges, width, sketch)
+            deburr_fusion.save_settings(op, used_edges, width, sketch,
+                                        job.side_clearance, job.lead_angle)
             cam.generateToolpath(op)
         except Exception:
             if op:

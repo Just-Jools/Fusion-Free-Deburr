@@ -338,7 +338,8 @@ def update_trace_curves(op: adsk.cam.Operation, curve_chains):
     _apply_curves(_curves_parameter(op), curve_chains)
 
 
-def update_operation(design, op, chains, edges, width, tool=None):
+def update_operation(design, op, chains, edges, width, tool=None,
+                     side_clearance=None, lead_angle=None):
     """Replace the sketch only after all operation settings have been applied."""
     settings = load_settings(op)
     old_sketch = find_by_token(design, settings.get('sketch'), adsk.fusion.Sketch.cast)
@@ -357,7 +358,7 @@ def update_operation(design, op, chains, edges, width, tool=None):
         if old_sketch:
             old_sketch.name = old_name + ' (old)'
         sketch.name = op.name
-        save_settings(op, edges, width, sketch)
+        save_settings(op, edges, width, sketch, side_clearance, lead_angle)
         if old_sketch and not old_sketch.deleteMe():
             raise dm.DeburrError('could not remove the replaced sketch')
     except Exception:
@@ -380,13 +381,18 @@ def update_operation(design, op, chains, edges, width, tool=None):
 
 # --- Settings stored on the operation, so it can be edited later ---------
 
-def save_settings(op: adsk.cam.Operation, edges, width, sketch):
+def save_settings(op: adsk.cam.Operation, edges, width, sketch,
+                  side_clearance=None, lead_angle=None):
     data = {
-        'version': 1,
+        'version': 2,
         'edges': [e.entityToken for e in edges],
         'width': width,
         'sketch': sketch.entityToken,
     }
+    if side_clearance is not None:
+        data['side_clearance'] = side_clearance
+    if lead_angle is not None:
+        data['lead_angle'] = lead_angle
     op.attributes.add(ATTR_GROUP, ATTR_NAME, json.dumps(data))
 
 
