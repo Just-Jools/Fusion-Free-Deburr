@@ -179,13 +179,11 @@ def edge_segment(edge: adsk.fusion.BRepEdge, radius, width, tool_axis, face_ids,
         if k in tangents:
             ends.append(dc.End(p, {id1: n1, id2: n2}, tangents[k]))
 
-    contacts = list(samples)
     if closed:
         tips.append(tips[0])
-        contacts.append(contacts[0])
 
     return dc.Segment(
-        tips=tips, contacts=contacts, start=ends[0], end=ends[-1],
+        tips=tips, start=ends[0], end=ends[-1],
         start_key=None if closed else _vertex_key(edge.startVertex),
         end_key=None if closed else _vertex_key(edge.endVertex),
         closed=closed, source=edge)
@@ -257,20 +255,7 @@ def build_sketch(design: adsk.fusion.Design, chains, name):
         for points in [p for chain in chains for p in dc.chain_polylines(chain)]:
             ctrl = [sketch.modelToSketchSpace(adsk.core.Point3D.create(*p)) for p in points]
             nurbs = adsk.core.NurbsCurve3D.createNonRational(ctrl, 1, dc.polyline_knots(points), False)
-            curve = splines.addByNurbsCurve(nurbs)
-            if not curve:
-                raise dm.DeburrError('Fusion could not create the 3D Trace curve')
-            # Do not silently hand Trace a flattened sketch.  The degree-1
-            # NURBS must preserve the complete 3D control-point envelope.
-            box = curve.boundingBox
-            actual = (_tup(box.minPoint), _tup(box.maxPoint))
-            control_points = [_tup(p) for p in ctrl]
-            expected = (tuple(min(p[k] for p in control_points) for k in range(3)),
-                        tuple(max(p[k] for p in control_points) for k in range(3)))
-            if any(abs(actual[end][k] - expected[end][k]) > PATH_TOL
-                   for end in range(2) for k in range(3)):
-                raise dm.DeburrError('Fusion flattened the generated 3D Trace curve')
-            curve_chains.append([curve])
+            curve_chains.append([splines.addByNurbsCurve(nurbs)])
         sketch.isComputeDeferred = False
     except Exception:
         sketch.deleteMe()
@@ -338,8 +323,7 @@ def update_trace_curves(op: adsk.cam.Operation, curve_chains):
     _apply_curves(_curves_parameter(op), curve_chains)
 
 
-def update_operation(design, op, chains, edges, width, tool=None,
-                     side_clearance=None, lead_angle=None):
+def update_operation(design, op, chains, edges, width, tool=None):
     """Replace the sketch only after all operation settings have been applied."""
     settings = load_settings(op)
     old_sketch = find_by_token(design, settings.get('sketch'), adsk.fusion.Sketch.cast)
@@ -358,7 +342,7 @@ def update_operation(design, op, chains, edges, width, tool=None,
         if old_sketch:
             old_sketch.name = old_name + ' (old)'
         sketch.name = op.name
-        save_settings(op, edges, width, sketch, side_clearance, lead_angle)
+        save_settings(op, edges, width, sketch)
         if old_sketch and not old_sketch.deleteMe():
             raise dm.DeburrError('could not remove the replaced sketch')
     except Exception:
@@ -381,18 +365,13 @@ def update_operation(design, op, chains, edges, width, tool=None,
 
 # --- Settings stored on the operation, so it can be edited later ---------
 
-def save_settings(op: adsk.cam.Operation, edges, width, sketch,
-                  side_clearance=None, lead_angle=None):
+def save_settings(op: adsk.cam.Operation, edges, width, sketch):
     data = {
-        'version': 2,
+        'version': 1,
         'edges': [e.entityToken for e in edges],
         'width': width,
         'sketch': sketch.entityToken,
     }
-    if side_clearance is not None:
-        data['side_clearance'] = side_clearance
-    if lead_angle is not None:
-        data['lead_angle'] = lead_angle
     op.attributes.add(ATTR_GROUP, ATTR_NAME, json.dumps(data))
 
 

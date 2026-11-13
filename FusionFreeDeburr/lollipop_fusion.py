@@ -16,9 +16,6 @@ from . import deburr_fusion as df
 
 CLEARANCE_STEP = .01  # cm, 0.1 mm maximum motion spacing
 CLEARANCE_MARGIN = .001  # cm, 0.01 mm
-CENTER_ENDPOINT_SEPARATION = .1  # cm; keep Trace from treating entry/exit as closed
-DEFAULT_SIDE_CLEARANCE = .05  # cm; extra offset from the compensated cutting path
-DEFAULT_SIDE_LEAD_ANGLE = math.pi / 2  # radians; quarter-turn helical entry
 
 
 def _same_body_placement(body, candidate):
@@ -115,8 +112,8 @@ class Clearance:
         self.temp = adsk.fusion.TemporaryBRepManager.get()
         self.cache = {}
 
-    def point(self, tip, margin, cutting=True):
-        key = (tip, margin, cutting)
+    def point(self, tip, margin):
+        key = (tip, margin)
         if key in self.cache:
             return self.cache[key]
         center = dm.add(tip, dm.scale(self.axis, self.cutter.radius))
@@ -125,7 +122,7 @@ class Clearance:
         obstacles = self.bodies + self.fixtures
         for body in obstacles:
             fixture = body in self.fixtures
-            allowance = 0 if fixture or not cutting else self.width
+            allowance = 0 if fixture else self.width
             if body.pointContainment(point) != outside:
                 self.cache[key] = 'ball center enters model or fixture'
                 return self.cache[key]
@@ -154,16 +151,16 @@ class Clearance:
         self.cache[key] = None
         return None
 
-    def path(self, points, cutting=True):
+    def path(self, points):
         def span(a, b, depth=0):
             margin = dc.dist(a, b) / 2 + CLEARANCE_MARGIN
             for p in (a, b):
-                error = self.point(p, margin, cutting)
+                error = self.point(p, margin)
                 if not error:
                     continue
                 # A close but valid cut can fail the coarse swept envelope.
                 # Refine it rather than rejecting small edge-break widths.
-                if self.point(p, CLEARANCE_MARGIN, cutting) or depth == 10:
+                if self.point(p, CLEARANCE_MARGIN) or depth == 10:
                     return error
                 midpoint = dm.scale(dm.add(a, b), .5)
                 return span(a, midpoint, depth + 1) or span(midpoint, b, depth + 1)
@@ -196,191 +193,12 @@ def _directions(edges, axis):
     return unique
 
 
-def _center_access(points, clearance):
-    """Approach a closed internal rim radially from its clear centre.
-
-    Every possible seam is checked because a bore may be partly obstructed.
-    The withdrawal endpoint is displaced slightly along the tool axis so the
-    complete approach/cut/withdrawal curve remains open for Trace.
-    """
-    if len(points) < 4 or dc.dist(points[0], points[-1]) > dc.JOIN_TOL:
-        return None
-    center = dc.closed_path_center(points)
-    if clearance.point(center, CLEARANCE_MARGIN):
-        return None
-
-    exits = [dm.add(center, dm.scale(clearance.axis, sign * CENTER_ENDPOINT_SEPARATION))
-             for sign in (1, -1)]
-    ring = points[:-1]
-    # Try the closest seam first; this normally gives the shortest radial move.
-    order = sorted(range(len(ring)), key=lambda i: dc.dist(center, ring[i]))
-    for i in order:
-        cut = dc.rotate_closed_path(points, i)
-        seam = cut[0]
-        if clearance.path([center, seam]) is not None:
-            continue
-        for exit_point in exits:
-            if (clearance.point(exit_point, CLEARANCE_MARGIN) is None and
-                    clearance.path([seam, center, exit_point]) is None):
-                return [center] + cut + [center, exit_point]
-    return None
-
-
-def _is_closed_side_loop(points, axis, radius):
-    """True for a closed contour with meaningful travel along the tool axis."""
-    if len(points) < 4 or dc.dist(points[0], points[-1]) > dc.JOIN_TOL:
-        return False
-    heights = [dm.dot(p, axis) for p in points[:-1]]
-    return max(heights) - min(heights) > max(10 * df.PATH_TOL, .1 * radius)
-
-
-def _loop_normal(points):
-    """Area-weighted normal of a closed, approximately planar tool-tip loop."""
-    normal = (0.0, 0.0, 0.0)
-    for a, b in zip(points, points[1:] + points[:1]):
-        normal = dm.add(normal, dm.cross(a, b))
-    if dm.dot(normal, normal) < 1e-12:
-        raise dm.DeburrError('could not determine the side-wall plane')
-    return dm.normalize(normal)
-
-
-def _partial_loop(cut, fraction):
-    """Return the first loop fraction and the complete loop rotated to its end."""
-    lengths = [dc.dist(a, b) for a, b in zip(cut, cut[1:])]
-    total = sum(lengths)
-    if total <= dc.JOIN_TOL:
-        raise dm.DeburrError('side-wall loop is too short for a curved lead')
-    target = total * min(1.0, max(0.0, fraction))
-    travelled = 0.0
-    lead = [cut[0]]
-    for i, length in enumerate(lengths):
-        if travelled + length < target - dc.JOIN_TOL:
-            lead.append(cut[i + 1])
-            travelled += length
-            continue
-        ratio = 0.0 if length == 0 else (target - travelled) / length
-        split = dm.add(cut[i], dm.scale(dm.sub(cut[i + 1], cut[i]), ratio))
-        if dc.dist(lead[-1], split) > dc.JOIN_TOL:
-            lead.append(split)
-        rotated = [split] + cut[i + 1:] + cut[1:i + 1] + [split]
-        return lead, dc._clean(rotated)
-    return list(cut), list(cut)
-
-
-def _side_helix(points, outward, clear_offset):
-    """Feed from `clear_offset` to the cutting path over the supplied arc."""
-    lengths = [dc.dist(a, b) for a, b in zip(points, points[1:])]
-    total = sum(lengths)
-    travelled = 0.0
-    result = []
-    for i, point in enumerate(points):
-        progress = 1.0 if total == 0 else travelled / total
-        result.append(dm.add(point, dm.scale(outward, clear_offset * (1 - progress))))
-        if i < len(lengths):
-            travelled += lengths[i]
-    return result
-
-
-def _is_external_side_loop(points, contacts, directions, axis):
-    """True when the gauge loop lies outside the selected planar wall face."""
-    ring = points[:-1]
-    contact_ring = contacts[:-1] if contacts else []
-    if len(contact_ring) != len(ring):
-        return False
-    plane_normal = _loop_normal(ring)
-    wall_normals = [dm.normalize(d) for d in directions
-                    if abs(dm.dot(dm.normalize(d), axis)) < 1e-6 and
-                    abs(dm.dot(dm.normalize(d), plane_normal)) > .5]
-    if not wall_normals:
-        return False
-    offset = tuple(sum(point[k] - contact[k]
-                       for point, contact in zip(ring, contact_ring)) / len(ring)
-                   for k in range(3))
-    return max(dm.dot(offset, normal) for normal in wall_normals) > df.PATH_TOL
-
-
-def _curved_side_access(points, contacts, directions, clearance,
-                        side_clearance, lead_angle):
-    """Enter a closed external side loop from off the wall with a smooth blend."""
-    axis = clearance.axis
-    ring = points[:-1]
-    contact_ring = contacts[:-1] if contacts else []
-    if len(contact_ring) != len(ring):
-        raise dm.DeburrError('side-wall lead is missing its model-edge reference points')
-    plane_normal = _loop_normal(ring)
-    candidates = [dm.normalize(d) for d in directions
-                  if abs(dm.dot(dm.normalize(d), axis)) < 1e-6]
-    if not candidates:
-        return None
-    alignment = [abs(dm.dot(d, plane_normal)) for d in candidates]
-    best = max(alignment)
-    # Ignore radial normals from the other edge face.  The approach direction
-    # must be normal to the plane of this side-wall loop.
-    horizontal = [d for d, score in zip(candidates, alignment)
-                  if score >= max(.9 * best, .5)]
-    heights = [dm.dot(p, axis) for p in ring]
-    # Enter at the top of the side-wall loop.  The explicit curve therefore
-    # descends outside the wall, turns through the Y-Z blend, feeds laterally
-    # into the top seam, and only then follows the X-Z cutting loop.
-    seam_order = sorted(range(len(ring)), key=lambda i: heights[i], reverse=True)
-
-    for i in seam_order:
-        cut = dc.rotate_closed_path(points, i)
-        seam = cut[0]
-        contact = contact_ring[i]
-        for outward in horizontal:
-            # The cutting sketch is already the compensated tool-centre path.
-            # Side-entry clearance is therefore additional offset from that
-            # path, not another cutter radius or diameter from the model wall.
-            lead_base, cut = _partial_loop(cut, lead_angle / (2 * math.pi))
-            helix = _side_helix(lead_base, outward, side_clearance)
-            outer_top = helix[0]
-            if clearance.point(outer_top, CLEARANCE_MARGIN, cutting=False):
-                continue
-            descent = 2 * clearance.cutter.radius + side_clearance
-            entry = dm.add(outer_top, dm.scale(axis, descent))
-            exit_ = dm.add(outer_top,
-                           dm.scale(axis, descent + CENTER_ENDPOINT_SEPARATION))
-            # The straight plunge is completely outside the wall.  The helix
-            # is then an intentional progressive cutting entry into the loop.
-            if clearance.path([entry, outer_top], cutting=False) is not None:
-                continue
-            path = [entry] + helix + cut[1:] + list(reversed(helix))[1:] + [exit_]
-            if clearance.path(path) is None:
-                return path
-    return None
-
-
-def add_access(points, directions, clearance, contacts=None,
-               side_clearance=DEFAULT_SIDE_CLEARANCE,
-               lead_angle=DEFAULT_SIDE_LEAD_ANGLE):
+def add_access(points, directions, clearance):
     """Move horizontally (or upward) outside every obstacle before Trace links.
 
     Return an open curve even when the cutting contour is closed. Trace must
     start and finish at the exterior endpoints, rather than choose a seam.
     """
-    side_loop = _is_closed_side_loop(points, clearance.axis, clearance.cutter.radius)
-    # An external loop can also have a clear geometric centre, but using it
-    # would select the old coplanar centre entry and bypass the 3D helix.
-    if side_loop and _is_external_side_loop(
-            points, contacts, directions, clearance.axis):
-        side_path = _curved_side_access(points, contacts, directions, clearance,
-                                        side_clearance, lead_angle)
-        if side_path is not None:
-            return side_path
-        raise dm.DeburrError('no clear curved outside approach for this side-wall rim')
-
-    center_path = _center_access(points, clearance)
-    if center_path is not None:
-        return center_path
-
-    if side_loop:
-        side_path = _curved_side_access(points, contacts, directions, clearance,
-                                        side_clearance, lead_angle)
-        if side_path is not None:
-            return side_path
-        raise dm.DeburrError('no clear curved outside approach for this side-wall rim')
-
     corners = [p for body in clearance.bodies + clearance.fixtures for p in _box_corners(body)]
     envelope = max([clearance.cutter.radius] +
                    [r for _, _, r in clearance.cutter.noncutting_sections])
@@ -399,9 +217,7 @@ def add_access(points, directions, clearance, contacts=None,
     return [access(points[0])] + points + [access(points[-1], .1)]
 
 
-def build_chains(edges, cutter, width, tool_axis, bodies, fixtures=(),
-                 side_clearance=DEFAULT_SIDE_CLEARANCE,
-                 lead_angle=DEFAULT_SIDE_LEAD_ANGLE):
+def build_chains(edges, cutter, width, tool_axis, bodies, fixtures=()):
     """Build and validate all selected edges; reject the operation on any failure."""
     if not edges or not math.isfinite(width) or width <= 0:
         raise dm.DeburrError('select edges and a positive finite edge break')
@@ -416,14 +232,10 @@ def build_chains(edges, cutter, width, tool_axis, bodies, fixtures=(),
         depth = df._cut_depth(ordered[0].source.body, cutter.radius, axis)
         chain = dc.link_chain(ordered, closed, axis, cutter.radius, width, depth, cutter)
         notes.extend(chain.notes)
-        paths = dc.chain_polylines(chain)
-        contacts = (ordered[0].contacts if closed and len(ordered) == 1 and len(paths) == 1
-                    else None)
-        for points in paths:
+        for points in dc.chain_polylines(chain):
             error = clearance.path(points)
             if error:
                 raise dm.DeburrError('lollipop cutting path: ' + error)
-            points = add_access(points, directions, clearance, contacts,
-                                side_clearance, lead_angle)
+            points = add_access(points, directions, clearance)
             chains.append(dc.Chain(pieces=[dc.Piece(points)], closed=False))
     return chains, edges, notes

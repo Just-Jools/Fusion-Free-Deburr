@@ -1,13 +1,13 @@
 {
-  "autodeskProduct": "Fusion",
-  "type": "addin",
-  "id": "969d0d30-1695-489b-9fd9-aaa5c91226dc",
-  "author": "jkkicks",
-  "description": {
-    "": "Ball and lollipop endmill edge-break / deburr toolpaths driven by generated 3D sketch geometry."
-  },
-  "version": "0.1.0-alpha.1",
-  "runOnStartup": true,
-  "supportedOS": "windows|mac",
-  "editEnabled": true
+	"autodeskProduct": "Fusion",
+	"type": "addin",
+	"id": "969d0d30-1695-489b-9fd9-aaa5c91226dc",
+	"author": "jkkicks",
+	"description": {
+		"": "Ball and lollipop endmill edge-break / deburr toolpaths driven by generated 3D sketch geometry."
+	},
+	"version": "0.1.0-alpha",
+	"runOnStartup": true,
+	"supportedOS": "windows|mac",
+	"editEnabled": true
 }

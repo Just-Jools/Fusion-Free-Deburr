@@ -37,15 +37,13 @@ class Segment:
     tips: list               # tool-tip points along the edge, start -> end
     start: End
     end: End
-    contacts: list = field(default_factory=list)  # matching points on the selected model edge
     start_key: object = None  # vertex identity, for chaining
     end_key: object = None
     closed: bool = False      # a single closed edge (e.g. a full circle)
     source: object = None     # caller's data (e.g. the BRepEdge)
 
     def reversed(self):
-        return replace(self, tips=self.tips[::-1], contacts=self.contacts[::-1],
-                       start=self.end, end=self.start,
+        return replace(self, tips=self.tips[::-1], start=self.end, end=self.start,
                        start_key=self.end_key, end_key=self.start_key)
 
 
@@ -247,33 +245,6 @@ def _clean(points):
         if not out or dist(p, out[-1]) > JOIN_TOL:
             out.append(p)
     return out
-
-
-def closed_path_center(points):
-    """Centroid of a closed tool-tip polyline, ignoring its repeated endpoint.
-
-    This is the natural first candidate for entering an internal circular rim:
-    the lollipop head moves from the free centre of the opening to the cut,
-    rather than approaching through the surrounding side wall.
-    """
-    ring = _clean(points)
-    if len(ring) > 1 and dist(ring[0], ring[-1]) <= JOIN_TOL:
-        ring = ring[:-1]
-    if len(ring) < 3:
-        raise dm.DeburrError('closed path has too few distinct points')
-    return tuple(sum(p[k] for p in ring) / len(ring) for k in range(3))
-
-
-def rotate_closed_path(points, index):
-    """Move a closed polyline's seam to ``index`` and keep it closed."""
-    ring = _clean(points)
-    if len(ring) > 1 and dist(ring[0], ring[-1]) <= JOIN_TOL:
-        ring = ring[:-1]
-    if not ring:
-        return []
-    index %= len(ring)
-    rotated = ring[index:] + ring[:index]
-    return rotated + [rotated[0]]
 
 
 def _corner(k, a_end, b_start, a_tip, b_tip, tool_axis, radius, width, depth, notes,
